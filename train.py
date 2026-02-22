@@ -7,18 +7,18 @@ import sys
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
-import torchvision
-from torchvision import datasets, transforms
+from torchvision import datasets
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from transforms import IMAGE_TRANSFORM, MASK_TRANSFORM
 
+#TODO: Make paramaters depend on environment variables for better flexibility.
 #===----CONSTANTS----===#
 LEARNING_RATE = 0.0001
 MODEL_PATH = 'model.pt'
-NUM_BATCHES = 6
+NUM_BATCHES = 16
 NUM_CLASSES = 21
-NUM_EPOCHS = 5
+NUM_EPOCHS = 60
 NUM_WORKERS = min(4, os.cpu_count() or 1)
 #===-----------------===#
 
@@ -41,9 +41,10 @@ def save_checkpoint(model, optimizer, epoch, path):
 def main(device, model_path):
 
     trainData = datasets.VOCSegmentation('./data', '2012', image_set='train', transform=IMAGE_TRANSFORM, target_transform=MASK_TRANSFORM)
-    trainLoader = DataLoader(dataset=trainData, batch_size=NUM_BATCHES, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory)
+    trainLoader = DataLoader(dataset=trainData, batch_size=NUM_BATCHES, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, persistent_workers=True)
 
-    model = UNet(NUM_CLASSES).to(device)
+    model = UNet(NUM_CLASSES).to(device=device, dtype=torch.bfloat16)
+    model = torch.compile(model)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     criterion = nn.CrossEntropyLoss(ignore_index=255)
 
@@ -68,10 +69,10 @@ def main(device, model_path):
                 logging.info("Gracefully exiting ...")
                 return
 
-            input, output = input.to(device, non_blocking=True), output.to(device, non_blocking=True)
+            input, output = input.to(device, non_blocking=True, dtype=torch.bfloat16), output.to(device, non_blocking=True, dtype=torch.bfloat16)
 
             output = torch.squeeze(output, 1).long()
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
 
             prediction = model(input)
             
