@@ -1,14 +1,15 @@
-import torch
+import logging
+from losses import compute_means
+import matplotlib.pyplot as plt
 from model import UNet
+import numpy
+import os
+import torch
 from torchvision import datasets
 from torch.utils.data import DataLoader
-from losses import compute_means
-from transforms import IMAGE_TRANSFORM, MASK_TRANSFORM
-import matplotlib.pyplot as plt
-import logging
-import os
 from tqdm import tqdm
-import numpy
+from tqdm.contrib.logging import logging_redirect_tqdm
+from transforms import IMAGE_TRANSFORM, MASK_TRANSFORM
 
 #------CONSTANTS-------#
 MODEL_PATH = 'model.pt'
@@ -59,19 +60,16 @@ def test_model():
                                         "pred_mask": pred_mask, 
                                         "true_mask": true_mask})
 
-
-            
             dice_coefficient, iou = compute_means(preds, target, NUM_CLASSES)
             total_DC += dice_coefficient
             total_iou += iou
             count += 1
 
-
     total_DC /= count
     total_iou /= count
 
-    logging.info("DC: ", total_DC)
-    logging.info("IoU: ", total_iou)
+    logging.info(f"DC: {total_DC}")
+    logging.info(f"IoU: {total_iou}")
 
 
 def view_results():
@@ -98,8 +96,6 @@ def view_results():
         plt.tight_layout()
         plt.show()
 
-
-
 def main():
     test_model()
     view_results()
@@ -112,6 +108,6 @@ if __name__ == "__main__":
         device = torch.device("cuda")
         pin_memory = True
     elif torch.mps.is_available(): device = torch.device("mps")
-
-
-    main()
+    logging.basicConfig(level=logging.INFO)
+    with logging_redirect_tqdm():
+        main()
