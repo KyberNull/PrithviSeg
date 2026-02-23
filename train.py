@@ -5,14 +5,15 @@ import os
 import signal
 import sys
 import torch
-from torch import nn, optim
+from torch.amp.autocast_mode import autocast
+from torch import nn, optim, GradScaler
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 from transforms import IMAGE_TRANSFORM, MASK_TRANSFORM
 
-#TODO: Make paramaters depend on environment variables for better flexibility.
+# TODO: Make parameters depend on .env/config.yaml/something similar for better flexibility.
 #===----CONSTANTS----===#
 LEARNING_RATE = 0.0001
 MODEL_PATH = 'model.pt'
@@ -24,6 +25,7 @@ NUM_WORKERS = min(4, os.cpu_count() or 1)
 
 shutdown_requested = False
 pin_memory = False
+amp_dtype = torch.bfloat16
 
 def handle_shutdown(sig, frame):
     global shutdown_requested
@@ -39,11 +41,12 @@ def save_checkpoint(model, optimizer, epoch, path):
     logging.info("Checkpoint saved.")
 
 def main(device, model_path):
+    scaler = GradScaler(enabled=(device.type == "cuda"))
 
     trainData = datasets.VOCSegmentation('./data', '2012', image_set='train', transform=IMAGE_TRANSFORM, target_transform=MASK_TRANSFORM)
-    trainLoader = DataLoader(dataset=trainData, batch_size=NUM_BATCHES, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, persistent_workers=True)
+    trainLoader = DataLoader(dataset=trainData, batch_size=NUM_BATCHES, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, persistent_workers=NUM_WORKERS > 0)
 
-    model = UNet(NUM_CLASSES).to(device=device, dtype=torch.bfloat16)
+    model = UNet(NUM_CLASSES).to(device)
     model = torch.compile(model)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     criterion = nn.CrossEntropyLoss(ignore_index=255)
@@ -60,8 +63,8 @@ def main(device, model_path):
         logging.warning("Checkpoint not found. Training from scratch.")
 
     model.train() #TODO: Add Validation 
-    for epoch in tqdm(range(start_epoch, NUM_EPOCHS), desc="Training", position=0):
-        epoch_bar = tqdm(trainLoader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}", leave=True, disable=not sys.stdout.isatty(), position=1)
+    for epoch in range(start_epoch, NUM_EPOCHS):
+        epoch_bar = tqdm(trainLoader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}", leave=True, disable=not sys.stdout.isatty(), position=0)
         running_loss = 0.0
         for batch, (input, output) in enumerate(epoch_bar):
             if shutdown_requested:
@@ -69,17 +72,19 @@ def main(device, model_path):
                 logging.info("Gracefully exiting ...")
                 return
 
-            input, output = input.to(device, non_blocking=True, dtype=torch.bfloat16), output.to(device, non_blocking=True, dtype=torch.bfloat16)
+            input, output = input.to(device, non_blocking=True), output.squeeze(1).to(device, non_blocking=True).long()
 
-            output = torch.squeeze(output, 1).long()
             optimizer.zero_grad(set_to_none=True)
 
-            prediction = model(input)
+            with autocast(device_type=device.type, dtype=amp_dtype):
+                prediction = model(input)
+                loss = criterion(prediction, output)
+                
+            loss += dice_loss(prediction, output, NUM_CLASSES)
             
-            #TODO: Add IoU for evaluation
-            loss = dice_loss(prediction, output, num_classes=NUM_CLASSES) + criterion(prediction, output)
-            loss.backward()
-            optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             running_loss += loss.item()
 
@@ -98,7 +103,10 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         device = torch.device('cuda')
         pin_memory = True
-    elif torch.mps.is_available(): device = torch.device('mps')
+        amp_dtype = torch.float16
+    elif torch.mps.is_available():
+        device = torch.device('mps')
+        amp_dtype = torch.float16
 
     logging.basicConfig(level=logging.INFO)
     with logging_redirect_tqdm():
