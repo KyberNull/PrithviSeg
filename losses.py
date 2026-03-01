@@ -1,12 +1,16 @@
+"""Loss and metric helpers for segmentation training and evaluation."""
+
 import torch
 
 def dice_loss(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth=1e-8):
     pred = torch.softmax(pred, dim=1)
 
+    # VOC uses label 255 as ignore; exclude those pixels from Dice computation.
     valid_mask = (target != 255)
     target = target.clone()
     target[~valid_mask] = 0  # temporary safe value
 
+    # one_hot returns [N, H, W, C], so permute to [N, C, H, W] for channel-wise math.
     target_onehot = torch.nn.functional.one_hot(target, num_classes)
     target_onehot = target_onehot.permute(0, 3, 1, 2).float()
 
@@ -19,12 +23,14 @@ def dice_loss(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth
     union = pred.sum(dim=(2, 3)) + target_onehot.sum(dim=(2, 3))
 
     dice = (2 * intersection + smooth) / (union + smooth)
+    # Average only over classes present in the target to avoid skew from absent classes.
     class_present = target_onehot.sum(dim=(2, 3)) > 0
     dice = (dice * class_present).sum(dim=1) / class_present.sum(dim=1).clamp_min(1)
     return 1 - dice.mean()
 
 def compute_means(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth = 1e-8):
     target = target.long()
+    # Ignore regions are excluded from both predictions and targets before metrics.
     valid_mask = (target != 255)
     safe_target = target.clone()
     safe_target[~valid_mask] = 0

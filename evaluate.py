@@ -1,15 +1,17 @@
+"""Evaluation and qualitative visualization utilities for model predictions."""
+
 import logging
 from losses import compute_means
 import matplotlib.pyplot as plt
 from model import UNet
 import numpy
 import os
+from rich.logging import RichHandler
 import torch
 from torchvision import datasets
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from tqdm.contrib.logging import logging_redirect_tqdm
-from transforms import IMAGE_TRANSFORM, MASK_TRANSFORM
+from transforms import VOCEvalTransforms
 
 #------CONSTANTS-------#
 MODEL_PATH = 'model.pt'
@@ -17,13 +19,15 @@ NUM_WORKERS = min(4, os.cpu_count() or 1)
 NUM_BATCHES = 6
 NUM_CLASSES = 21
 MAX_EXAMPLES = 10
+IGNORE_LABEL = 255
 
 pin_memory = False
 results_to_view = []
+logger = logging.getLogger(__name__)
 
 def test_model():
         
-    testData = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transform = IMAGE_TRANSFORM, target_transform = MASK_TRANSFORM)
+    testData = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = VOCEvalTransforms())
     testLoader = DataLoader(dataset=testData, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, batch_size=16, persistent_workers=True)
 
 
@@ -35,7 +39,11 @@ def test_model():
         ckpt = torch.load("model.pt")
         model.load_state_dict(ckpt["model_state"])
     except FileNotFoundError:
-        logging.warning("Saved model cannot be found. Train a model first")
+        logger.error("Saved model cannot be found. Train a model first")
+        return
+    except RuntimeError as err:
+        logger.error(f"Saved checkpoint is incompatible with current model architecture: {err}")
+        return
 
     model.eval()
     count = 0
@@ -48,10 +56,12 @@ def test_model():
         for (test_input, target) in testing_bar:
             test_input = test_input.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
+            # Convert masks from [N, 1, H, W] to [N, H, W] class ids.
             target = target.squeeze(1)
             preds = model(test_input)
 
             if (len(results_to_view) < MAX_EXAMPLES):
+                # Keep one qualitative sample per batch for quick visual inspection.
                 test_input_img = test_input[0].cpu().numpy().transpose(1,2,0)
                 pred_mask = torch.argmax(preds[0], dim = 0).cpu().numpy()
                 true_mask = target[0].cpu().numpy()
@@ -68,8 +78,8 @@ def test_model():
     total_DC /= count
     total_iou /= count
 
-    logging.info(f"DC: {total_DC}")
-    logging.info(f"IoU: {total_iou}")
+    logger.info(f"mDC: {total_DC:.4f}")
+    logger.info(f"mIoU: {total_iou:.4f}")
 
 
 def view_results():
@@ -78,18 +88,18 @@ def view_results():
         plt.figure(figsize=(15,5))
 
         plt.subplot(1,3,1)
-        img = (data["image"] * [0.229, 0.224, 0.225]) + [0.485, 0.456, 0.406]
-        plt.imshow(numpy.clip(img, 0, 1))
+        plt.imshow(numpy.clip(data["image"], 0, 1))
         plt.title(f"Example {i+1}: Input")
         plt.axis('off')
 
         plt.subplot(1,3,2)
-        plt.imshow(data["true_mask"])
+        true_mask = numpy.ma.masked_equal(data["true_mask"], IGNORE_LABEL)
+        plt.imshow(true_mask, cmap="tab20", vmin=0, vmax=NUM_CLASSES - 1, interpolation="nearest")
         plt.title("Ground Truth")
         plt.axis("off")
 
         plt.subplot(1,3,3)
-        plt.imshow(data["pred_mask"])
+        plt.imshow(data["pred_mask"], cmap="tab20", vmin=0, vmax=NUM_CLASSES - 1, interpolation="nearest")
         plt.title("Predicted Mask")
         plt.axis("off")
 
@@ -108,6 +118,10 @@ if __name__ == "__main__":
         device = torch.device("cuda")
         pin_memory = True
     elif torch.mps.is_available(): device = torch.device("mps")
-    logging.basicConfig(level=logging.INFO)
-    with logging_redirect_tqdm():
-        main()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        handlers=[RichHandler()],
+        force=True,
+    )
+    main()

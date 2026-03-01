@@ -1,5 +1,5 @@
 
->Develop an AI/ML model to identify key features from SVAMITVA Scheme drone orthophotos.
+> Develop an AI/ML model to identify key features from SVAMITVA Scheme drone orthophotos.
 
 # Scope
 - Extract building footprints and classify rooftops (RCC, Tiled, Tin, etc.).
@@ -17,3 +17,5 @@
 - Feature-extracted datasets for training villages.
 - Technical documentation covering model design, training, and deployment.
 - Final report with accuracy metrics and improvement recommendations.
+
+> Note: For VOC Segmentation, mask image has a special pixel value 255 that means “ignore this area.” `plt.imshow` treats that 255 as the top of the color scale. Real classes are only 0 to 20, so they got squeezed into very dark colors. That’s why you mostly saw the boundary/outline and not full regions.
