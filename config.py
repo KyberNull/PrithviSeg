@@ -54,6 +54,8 @@ class TrainConfig:
     num_classes: int
     num_epochs: int
     num_workers: int
+    val_interval: int
+    num_val_samples: int
 
     @property
     def num_batches(self) -> int:
@@ -82,6 +84,8 @@ def get_train_config() -> TrainConfig:
         num_classes=_get_int("NUM_CLASSES", 21),
         num_epochs=_get_int("TRAIN_EPOCHS", 300),
         num_workers=_get_int("NUM_WORKERS", min(4, os.cpu_count() or 1)),
+        val_interval=_get_int("VAL_INTERVAL", 5),
+        num_val_samples=_get_int("NUM_VAL_SAMPLES", 140),
     )
 
 
