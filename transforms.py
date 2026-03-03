@@ -31,7 +31,7 @@ class VOCEvalTransforms:
 
 class VOCTrainTransforms:
     '''Data augmentation transforms for training, including random resized cropping, horizontal flipping, and rotation.'''
-    def __init__(self, size=(256, 256), scale=(0.5, 1.0), ratio=(3 / 4, 4 / 3), rotation_degrees=5):
+    def __init__(self, size=(256, 256), scale=(0.8, 1.0), ratio=(3 / 4, 4 / 3), rotation_degrees=5):
         self.size = size
         self.scale = scale
         self.ratio = ratio

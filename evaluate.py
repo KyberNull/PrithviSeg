@@ -11,7 +11,7 @@ import torch
 from torchvision import datasets
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transforms import VOCEvalTransforms
+from transforms import VOCEvalTransforms, IMAGENET_MEAN, IMAGENET_STD
 
 config = get_eval_config()
 MODEL_PATH = config.model_path
@@ -86,9 +86,11 @@ def view_results():
     
     for i,data in enumerate(results_to_view):
         plt.figure(figsize=(15,5))
+        image = data["image"]
+        image = (image * numpy.array(IMAGENET_STD)) + numpy.array(IMAGENET_MEAN)
 
         plt.subplot(1,3,1)
-        plt.imshow(numpy.clip(data["image"], 0, 1))
+        plt.imshow(numpy.clip(image, 0, 1))
         plt.title(f"Example {i+1}: Input")
         plt.axis('off')
 
