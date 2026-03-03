@@ -22,15 +22,17 @@ class ConvBlock(nn.Module):
         return x
 
 class Up(nn.Module):
-    '''An upsampling block that applies a transposed convolution to upsample the input, 
+    '''An upsampling block that applies bilinear interpolation to upsample the input,
     concatenates it with the corresponding skip connection, and applies a convolutional block.'''
     def __init__(self, in_ch: int, skip_ch: int, out_ch: int):
         super().__init__()
-        self.up = nn.ConvTranspose2d(in_ch, in_ch // 2, 2, stride=2)
+        self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
+        self.proj = nn.Conv2d(in_ch, in_ch // 2, kernel_size=1, bias=False)
         self.conv = ConvBlock(in_ch // 2 + skip_ch, out_ch)
 
     def forward(self, x, skip):
         x = self.up(x)
+        x = self.proj(x)
         x = torch.cat([x, skip], dim=1)
         return self.conv(x)
 
