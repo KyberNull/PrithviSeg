@@ -55,7 +55,7 @@ def main(device, model_path):
     model = UNet(NUM_CLASSES).to(device)
     model = torch.compile(model)
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
-    scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS * NUM_BATCHES, eta_min=LEARNING_RATE / 100)
+    scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS * len(trainLoader), eta_min=LEARNING_RATE / 10)
     criterion = nn.CrossEntropyLoss(ignore_index=255)
 
     start_epoch = 0
@@ -97,7 +97,6 @@ def main(device, model_path):
                 loss += dice_loss(prediction, output, NUM_CLASSES)
             
             scaler.scale(loss).backward()
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scheduler.step()
             scaler.update()
