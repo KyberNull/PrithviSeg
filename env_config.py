@@ -2,10 +2,23 @@
 
 from dataclasses import dataclass
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+
+def _load_environment() -> None:
+    root_dir = Path(__file__).resolve().parent
+    env_example_path = root_dir / ".env.example"
+    env_path = root_dir / ".env"
+
+    if env_example_path.exists():
+        load_dotenv(dotenv_path=env_example_path)
+
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path, override=True)
+
+_load_environment()
 
 
 def _get_int(name: str, default: int) -> int:
