@@ -1,11 +1,11 @@
 """Evaluation and qualitative visualization utilities for model predictions."""
 
+from config import get_eval_config
 import logging
 from losses import compute_means
 import matplotlib.pyplot as plt
 from model import UNet
 import numpy
-import os
 from rich.logging import RichHandler
 import torch
 from torchvision import datasets
@@ -13,13 +13,13 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transforms import VOCEvalTransforms
 
-#------CONSTANTS-------#
-MODEL_PATH = 'model.pt'
-NUM_WORKERS = min(4, os.cpu_count() or 1)
-NUM_BATCHES = 6
-NUM_CLASSES = 21
-MAX_EXAMPLES = 10
-IGNORE_LABEL = 255
+config = get_eval_config()
+MODEL_PATH = config.model_path
+NUM_WORKERS = config.num_workers
+NUM_BATCHES = config.num_batches
+NUM_CLASSES = config.num_classes
+MAX_EXAMPLES = config.max_examples
+IGNORE_LABEL = config.ignore_label
 
 pin_memory = False
 results_to_view = []
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def test_model():
         
     testData = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = VOCEvalTransforms())
-    testLoader = DataLoader(dataset=testData, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, batch_size=16, persistent_workers=True)
+    testLoader = DataLoader(dataset=testData, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, batch_size=NUM_BATCHES, persistent_workers=NUM_WORKERS > 0)
 
 
     model = UNet(NUM_CLASSES).to(device=device, non_blocking=True)
@@ -36,7 +36,7 @@ def test_model():
 
 
     try:
-        ckpt = torch.load("model.pt")
+        ckpt = torch.load(MODEL_PATH)
         model.load_state_dict(ckpt["model_state"])
     except FileNotFoundError:
         logger.error("Saved model cannot be found. Train a model first")
@@ -114,10 +114,14 @@ def main():
 if __name__ == "__main__":
 
     device = torch.device("cpu")
+
     if torch.cuda.is_available():
         device = torch.device("cuda")
         pin_memory = True
+        torch.backends.cudnn.benchmark = True
+
     elif torch.mps.is_available(): device = torch.device("mps")
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(message)s",

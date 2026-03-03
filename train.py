@@ -1,9 +1,9 @@
 """Training loop for the segmentation model."""
 
+from config import get_train_config
 import logging
 from losses import dice_loss
 from model import UNet
-import os
 from rich.logging import RichHandler
 import signal
 import sys
@@ -14,15 +14,13 @@ from torchvision import datasets
 from tqdm import tqdm
 from transforms import VOCTrainTransforms
 
-# TODO: Make parameters depend on .env/config.yaml/something similar for better flexibility.
-#===----CONSTANTS----===#
-LEARNING_RATE = 0.001 #TODO: Add learning rate scheduler and make this more dynamic.
-MODEL_PATH = 'model.pt'
-NUM_BATCHES = 32
-NUM_CLASSES = 21
-NUM_EPOCHS = 300
-NUM_WORKERS = min(4, os.cpu_count() or 1)
-#===-----------------===#
+config = get_train_config()
+LEARNING_RATE = config.learning_rate
+MODEL_PATH = config.model_path
+NUM_BATCHES = config.num_batches
+NUM_CLASSES = config.num_classes
+NUM_EPOCHS = config.num_epochs
+NUM_WORKERS = config.num_workers
 
 shutdown_requested = False
 pin_memory = False
@@ -115,6 +113,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, handle_shutdown)
 
     device = torch.device('cpu')
+
     if torch.cuda.is_available():
         device = torch.device('cuda')
         pin_memory = True
