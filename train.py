@@ -9,6 +9,7 @@ import signal
 import sys
 import torch
 from torch import nn, optim, autocast
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from tqdm import tqdm
@@ -54,6 +55,7 @@ def main(device, model_path):
     model = UNet(NUM_CLASSES).to(device)
     model = torch.compile(model)
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
+    scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS * NUM_BATCHES, eta_min=LEARNING_RATE / 100)
     criterion = nn.CrossEntropyLoss(ignore_index=255)
 
     start_epoch = 0
@@ -95,13 +97,15 @@ def main(device, model_path):
                 loss += dice_loss(prediction, output, NUM_CLASSES)
             
             scaler.scale(loss).backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
+            scheduler.step()
             scaler.update()
 
             running_loss += loss.item()
 
             avg_loss = running_loss / (batch + 1)
-            epoch_bar.set_postfix(loss=avg_loss) # Shows AVG Loss NOT Batch Loss
+            epoch_bar.set_postfix(loss=avg_loss, lr=scheduler.get_last_lr()[0]) # Shows AVG Loss NOT Batch Loss
         
         #TODO: Maybe save best model and current model
         save_checkpoint(model=model, optimizer=optimizer, epoch=epoch, path=MODEL_PATH)
