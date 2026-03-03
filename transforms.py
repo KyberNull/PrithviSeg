@@ -22,6 +22,7 @@ class VOCEvalTransforms:
 
         image = F.to_image(image)
         image = F.to_dtype(image, torch.float32, scale=True)
+        image = F.normalize(image, mean=IMAGENET_MEAN, std=IMAGENET_STD)
 
         mask = F.to_image(mask)
         mask = F.to_dtype(mask, torch.int64, scale=False)
