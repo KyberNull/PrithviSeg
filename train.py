@@ -43,34 +43,32 @@ def save_checkpoint(model, optimizer, epoch, path):
         "optim_state": optimizer.state_dict(),
     }, path)
 
-def validate(model, val_iterator, device, epoch, criterion):
-    if (epoch + 1) % VAL_INTERVAL == 0:
-        model.eval()
-        running_val_loss = 0.0
-        total_iou = 0.0
-        with torch.no_grad():
-            for i in range(NUM_VAL_SAMPLES):
-                val_input, val_output = next(val_iterator)
+def validate(model, val_iterator, device, criterion):
+    model.eval()
+    running_val_loss = 0.0
+    total_iou = 0.0
+    with torch.no_grad():
+        for i in range(NUM_VAL_SAMPLES):
+            val_input, val_output = next(val_iterator)
 
-                val_input, val_output = val_input.to(device, non_blocking=True), val_output.squeeze(1).to(device, non_blocking=True).long()
+            val_input, val_output = val_input.to(device, non_blocking=True), val_output.squeeze(1).to(device, non_blocking=True).long()
 
-                with autocast(device_type=device.type, dtype=amp_dtype):
-                    val_prediction = model(val_input)
-                    val_loss = criterion(val_prediction, val_output)
+            val_prediction = model(val_input)
+            val_loss = criterion(val_prediction, val_output)
 
-                running_val_loss += val_loss.item()
+            running_val_loss += val_loss.item()
 
-                _, iou = compute_means(val_prediction, val_output, NUM_CLASSES)
-                total_iou += iou
+            _, iou = compute_means(val_prediction, val_output, NUM_CLASSES)
+            total_iou += iou
 
-            total_iou /= NUM_VAL_SAMPLES
+        total_iou /= NUM_VAL_SAMPLES
 
-            running_val_loss /= NUM_VAL_SAMPLES
-                
-            logging.info(f"mCEL: {running_val_loss:.4f}")
-            logging.info(f"mIoU: {total_iou:.4f}")
+        running_val_loss /= NUM_VAL_SAMPLES
+            
+        logging.info(f"mCEL: {running_val_loss:.4f}")
+        logging.info(f"mIoU: {total_iou:.4f}")
 
-            model.train()
+        model.train()
 
 def main(device, model_path):
     # GradScaler is only useful on CUDA where float16 gradients can underflow.
@@ -134,11 +132,12 @@ def main(device, model_path):
             avg_loss = running_loss / (batch + 1)
             epoch_bar.set_postfix(loss=avg_loss) # Shows AVG Loss NOT Batch Loss
         
+        # Validation loop
+        if (epoch + 1) % VAL_INTERVAL == 0:
+            validate(model, val_iterator, device, criterion)
+        
         #TODO: Maybe save best model and current model
         save_checkpoint(model=model, optimizer=optimizer, epoch=epoch, path=MODEL_PATH)
-
-        # Validation loop
-        validate(model, val_iterator, device, epoch, criterion)
         
 
     logger.info("Training complete. Checkpoint saved.")
