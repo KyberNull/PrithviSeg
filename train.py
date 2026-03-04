@@ -33,11 +33,13 @@ def handle_shutdown(sig, frame):
     logger.warning(f'Shutdown requested! Signal: {sig}')
     shutdown_requested = True
 
-def save_checkpoint(model, optimizer, epoch, path):
+def save_checkpoint(model, optimizer, scheduler, scaler, epoch, path):
     torch.save({
         "epoch": epoch,
         "model_state": model.state_dict(),
         "optim_state": optimizer.state_dict(),
+        "scheduler_state": scheduler.state_dict(),
+        "scaler_state": scaler.state_dict(),
     }, path)
 
 def main(device, model_path):
@@ -61,15 +63,18 @@ def main(device, model_path):
     start_epoch = 0
 
     try:
-        # Resume both model and optimizer states to continue training seamlessly.
+        # Resume model, optimizer, scheduler, and scaler states to continue training seamlessly.
         ckpt = torch.load(model_path, map_location=device)
         model.load_state_dict(ckpt["model_state"])
         optimizer.load_state_dict(ckpt["optim_state"])
-        start_epoch = ckpt["epoch"] + 1
+        scheduler.load_state_dict(ckpt["scheduler_state"])
+        scaler.load_state_dict(ckpt["scaler_state"])
+
+        start_epoch = ckpt.get("epoch", -1) + 1
         logger.info(f"Resuming training from epoch {start_epoch}")
     except FileNotFoundError:
         logger.warning("Checkpoint not found. Training from scratch.")
-    except RuntimeError as err:
+    except RuntimeError or KeyError as err:
         logger.error(f"Checkpoint incompatible with current model architecture: {err}")
         logger.warning("Training from scratch.")
 
@@ -79,7 +84,7 @@ def main(device, model_path):
         running_loss = 0.0
         for batch, (input, output) in enumerate(epoch_bar):
             if shutdown_requested:
-                save_checkpoint(model, optimizer, epoch, MODEL_PATH)
+                save_checkpoint(model, optimizer, scheduler, scaler, epoch, MODEL_PATH)
                 logger.info("Checkpoint saved. Gracefully exiting...")
                 return
 
@@ -107,7 +112,7 @@ def main(device, model_path):
             epoch_bar.set_postfix(loss=avg_loss, lr=scheduler.get_last_lr()[0]) # Shows AVG Loss NOT Batch Loss
         
         #TODO: Maybe save best model and current model
-        save_checkpoint(model=model, optimizer=optimizer, epoch=epoch, path=MODEL_PATH)
+        save_checkpoint(model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler, epoch=epoch, path=MODEL_PATH)
     logger.info("Training complete. Checkpoint saved.")
 
 if __name__ == "__main__":
