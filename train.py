@@ -14,7 +14,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from tqdm import tqdm
-from transforms import VOCTrainTransforms, VOCEvalTransforms
+from transforms import TrainTransforms, EvalTransforms
 
 config = get_train_config()
 LEARNING_RATE = config.learning_rate
@@ -96,9 +96,9 @@ def main(device, model_path):
     # GradScaler is only useful on CUDA where float16 gradients can underflow.
     scaler = torch.GradScaler(enabled=(device.type == "cuda"))
 
-    trainDataset = datasets.VOCSegmentation('./data', year = '2012', image_set = 'train', transforms = VOCTrainTransforms())
+    trainDataset = datasets.VOCSegmentation('./data', year = '2012', image_set = 'train', transforms = TrainTransforms())
     trainLoader = DataLoader(dataset=trainDataset, batch_size=NUM_BATCHES, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, persistent_workers=NUM_WORKERS > 0)
-    vailidationDataset = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = VOCEvalTransforms())
+    vailidationDataset = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = EvalTransforms())
     validationLoader = DataLoader(dataset=vailidationDataset, batch_size=NUM_BATCHES, shuffle=False, num_workers=NUM_WORKERS, pin_memory=pin_memory)
 
     model = UNet(NUM_CLASSES).to(device)
@@ -148,7 +148,7 @@ def main(device, model_path):
                 logger.info("Checkpoint saved. Gracefully exiting...")
                 return
 
-            # VOC masks come as [N, 1, H, W]; CrossEntropyLoss expects [N, H, W] class ids.
+            # Masks come as [N, 1, H, W]; CrossEntropyLoss expects [N, H, W] class ids.
             input, output = input.to(device, non_blocking=True), output.squeeze(1).to(device, non_blocking=True).long()
 
             # set_to_none avoids unnecessary memory writes compared to zeroing tensors.

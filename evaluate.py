@@ -11,7 +11,7 @@ import torch
 from torchvision import datasets
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transforms import VOCEvalTransforms, IMAGENET_MEAN, IMAGENET_STD
+from transforms import EvalTransforms, IMAGENET_MEAN, IMAGENET_STD
 
 config = get_eval_config()
 MODEL_PATH = config.model_path
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 def test_model():
         
-    testData = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = VOCEvalTransforms())
+    testData = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = EvalTransforms())
     testLoader = DataLoader(dataset=testData, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, batch_size=NUM_BATCHES, persistent_workers=NUM_WORKERS > 0)
 
 

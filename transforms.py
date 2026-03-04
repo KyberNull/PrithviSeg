@@ -1,6 +1,5 @@
-"""Data Augmentation and preprocessing transforms for VOC segmentation."""
+"""Data Augmentation and preprocessing transforms for Segmentation."""
 
-import random
 import torch
 from torchvision.transforms import v2
 from torchvision.transforms import InterpolationMode
@@ -10,9 +9,10 @@ IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
 
-class VOCEvalTransforms:
-    '''Transforms for evaluation, including resizing and type conversions.'''
-    #Does only resize and type conversions for consistent evaluation
+class EvalTransforms:
+    '''Transforms for evaluation, including resizing and type conversions. 
+        Does only resize and type conversions for consistent evaluation.
+    '''
     def __init__(self, size=(256, 256)):
         self.size = size
 
@@ -29,45 +29,27 @@ class VOCEvalTransforms:
 
         return image, mask
 
-class VOCTrainTransforms:
-    '''Data augmentation transforms for training, including random resized cropping, horizontal flipping, and rotation.'''
-    def __init__(self, size=(256, 256), scale=(0.8, 1.0), ratio=(3 / 4, 4 / 3), rotation_degrees=5):
+class TrainTransforms:
+    '''Data augmentation transforms for training,
+    including random resized cropPIng, horizontal flipping, and rotation.
+    '''
+    def __init__(self, size=(256, 256), scale=(0.5, 1.), ratio=(1, 1), rotation_degrees=5):
         self.size = size
         self.scale = scale
         self.ratio = ratio
         self.rotation_degrees = rotation_degrees
+        self.flips = v2.Compose([
+            v2.RandomHorizontalFlip(),
+            v2.RandomVerticalFlip(),
+        ])
+        self.random_resized_crop = v2.RandomResizedCrop(size=self.size, scale=self.scale, ratio=self.ratio)
+        self.colorjitter = v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05,)
 
-    def __call__(self, image: torch.Tensor, mask: torch.Tensor):
-        #Gets the paramters and resizes and interpolates the images and masks
-        i, j, h, w = v2.RandomResizedCrop.get_params(image, self.scale, self.ratio)
-        image = F.resized_crop(
-            image,
-            top=i,
-            left=j,
-            height=h,
-            width=w,
-            size=self.size,
-            interpolation=InterpolationMode.BILINEAR,
-            antialias=True,
-        )
-        mask = F.resized_crop(
-            mask,
-            top=i,
-            left=j,
-            height=h,
-            width=w,
-            size=self.size,
-            interpolation=InterpolationMode.NEAREST,
-        )
+    def __call__(self, image: torch.Tensor, mask: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 
-        if random.random() < 0.5:
-            image = F.horizontal_flip(image)
-            mask = F.horizontal_flip(mask)
-
-        #Implementing the rotation for both image and mask, mask the fill is 255 by the dataset VOCSegmentation and image it is 0 (background)
-        angle = random.uniform(-self.rotation_degrees, self.rotation_degrees)
-        image = F.rotate(image, angle=angle, interpolation=InterpolationMode.BILINEAR, fill=0) #type: ignore
-        mask = F.rotate(mask, angle=angle, interpolation=InterpolationMode.NEAREST, fill=255) #type: ignore
+        image, mask = self.flips(image, mask)
+        image, mask = self.random_resized_crop(image, mask)
+        image = self.colorjitter(image)
 
         #Converting the image to float32 and mask to int64 as only one channel in mask
         image = F.to_image(image)
