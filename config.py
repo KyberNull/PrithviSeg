@@ -49,6 +49,9 @@ def _get_str(name: str, default: str) -> str:
 @dataclass(frozen=True)
 class TrainConfig:
     learning_rate: float
+    warmup_epochs: int
+    restart_cycle_epochs: int
+    restart_cycle_mult: int
     model_path: str
     batch_size: int
     num_classes: int
@@ -78,7 +81,10 @@ class EvalConfig:
 
 def get_train_config() -> TrainConfig:
     return TrainConfig(
-        learning_rate=_get_float("TRAIN_LEARNING_RATE", 0.001),
+        learning_rate=_get_float("TRAIN_LEARNING_RATE", 0.003),
+        warmup_epochs=_get_int("TRAIN_WARMUP_EPOCHS", 5),
+        restart_cycle_epochs=_get_int("TRAIN_RESTART_CYCLE_EPOCHS", 20),
+        restart_cycle_mult=_get_int("TRAIN_RESTART_CYCLE_MULT", 2),
         model_path=_get_str("MODEL_PATH", "model.pt"),
         batch_size=_get_int("TRAIN_BATCH_SIZE", 32),
         num_classes=_get_int("NUM_CLASSES", 21),

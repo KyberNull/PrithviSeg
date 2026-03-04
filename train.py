@@ -5,13 +5,12 @@ from itertools import cycle
 import logging
 from losses import dice_loss, compute_means
 from model import UNet
-import os
 from rich.logging import RichHandler
 import signal
 import sys
 import torch
 from torch import nn, optim, autocast
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 from torchvision import datasets
 from tqdm import tqdm
@@ -19,6 +18,9 @@ from transforms import VOCTrainTransforms, VOCEvalTransforms
 
 config = get_train_config()
 LEARNING_RATE = config.learning_rate
+WARMUP_EPOCHS = config.warmup_epochs
+RESTART_CYCLE_EPOCHS = config.restart_cycle_epochs
+RESTART_CYCLE_MULT = config.restart_cycle_mult
 MODEL_PATH = config.model_path
 NUM_BATCHES = config.num_batches
 NUM_CLASSES = config.num_classes
@@ -80,12 +82,27 @@ def main(device, model_path):
     trainDataset = datasets.VOCSegmentation('./data', year = '2012', image_set = 'train', transforms = VOCTrainTransforms())
     trainLoader = DataLoader(dataset=trainDataset, batch_size=NUM_BATCHES, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, persistent_workers=NUM_WORKERS > 0)
     vailidationDataset = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = VOCEvalTransforms())
-    validationLoader = DataLoader(dataset=vailidationDataset, batch_size=NUM_BATCHES, shuffle=False, num_workers=NUM_WORKERS, pin_memory=pin_memory, persistent_workers=NUM_WORKERS > 0)
+    validationLoader = DataLoader(dataset=vailidationDataset, batch_size=NUM_BATCHES, shuffle=False, num_workers=NUM_WORKERS, pin_memory=pin_memory)
 
     model = UNet(NUM_CLASSES).to(device)
     model = torch.compile(model)
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
-    scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS * len(trainLoader), eta_min=LEARNING_RATE / 10)
+    warmup_steps = min(max(0, WARMUP_EPOCHS * len(trainLoader)), max(0, NUM_EPOCHS * len(trainLoader) - 1))
+    restart_cycle_steps = max(1, RESTART_CYCLE_EPOCHS * len(trainLoader))
+    restart_cycle_mult = max(1, RESTART_CYCLE_MULT)
+    
+    scheduler = CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=restart_cycle_steps,
+            T_mult=restart_cycle_mult,
+            eta_min=LEARNING_RATE * 0.1,
+        )
+    if warmup_steps > 0:
+        warmup_scheduler = LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup_steps,)
+        scheduler = SequentialLR(
+            optimizer, schedulers=[warmup_scheduler, scheduler], milestones=[warmup_steps],
+        )
+
     criterion = nn.CrossEntropyLoss(ignore_index=255)
 
     start_epoch = 0
@@ -103,11 +120,11 @@ def main(device, model_path):
         logger.info(f"Resuming training from epoch {start_epoch}")
     except FileNotFoundError:
         logger.warning("Checkpoint not found. Training from scratch.")
-    except RuntimeError or KeyError as err:
+    except (RuntimeError, KeyError) as err:
         logger.error(f"Checkpoint incompatible with current model architecture: {err}")
         logger.warning("Training from scratch.")
 
-    model.train() #TODO: Add Validation 
+    model.train()
     for epoch in range(start_epoch, NUM_EPOCHS):
         epoch_bar = tqdm(trainLoader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}", leave=True, disable=not sys.stdout.isatty(), position=0)
         running_loss = 0.0
