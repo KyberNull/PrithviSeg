@@ -20,7 +20,14 @@ class MBConvBlock(nn.Module):
     expand → depthwise → project
     '''
 
-    def __init__(self, in_ch: int, out_ch: int, expand_ratio=4, groups=4):
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        expand_ratio=4,
+        groups=4,
+        dilation: int = 1,
+    ):
         super().__init__()
 
         mid_ch = in_ch * expand_ratio
@@ -32,7 +39,15 @@ class MBConvBlock(nn.Module):
             nn.SiLU(inplace=True),
 
             # depthwise
-            nn.Conv2d(mid_ch, mid_ch, 3, padding=1, groups=mid_ch, bias=False),
+            nn.Conv2d(
+                mid_ch,
+                mid_ch,
+                3,
+                padding=dilation,
+                dilation=dilation,
+                groups=mid_ch,
+                bias=False,
+            ),
             nn.GroupNorm(groups, mid_ch),
             nn.SiLU(inplace=True),
 
@@ -111,9 +126,9 @@ class ASPP(nn.Module):
             nn.SiLU(inplace=True)
         )
 
-        self.branch2 = DilatedMBConv(in_ch, out_ch, rates[0])
-        self.branch3 = DilatedMBConv(in_ch, out_ch, rates[1])
-        self.branch4 = DilatedMBConv(in_ch, out_ch, rates[2])
+        self.branch2 = MBConvBlock(in_ch, out_ch, groups=8, dilation=rates[0])
+        self.branch3 = MBConvBlock(in_ch, out_ch, groups=8, dilation=rates[1])
+        self.branch4 = MBConvBlock(in_ch, out_ch, groups=8, dilation=rates[2])
 
         self.pool = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
@@ -151,39 +166,6 @@ class ASPP(nn.Module):
 
         return self.project(x)
 
-class DilatedMBConv(nn.Module):
-    def __init__(self, in_ch, out_ch, dilation, expand_ratio=4, groups=8):
-        super().__init__()
-
-        mid_ch = in_ch * expand_ratio
-
-        self.block = nn.Sequential(
-            # expand
-            nn.Conv2d(in_ch, mid_ch, 1, bias=False),
-            nn.GroupNorm(groups, mid_ch),
-            nn.SiLU(inplace=True),
-
-            # depthwise dilated
-            nn.Conv2d(
-                mid_ch,
-                mid_ch,
-                3,
-                padding=dilation,
-                dilation=dilation,
-                groups=mid_ch,
-                bias=False
-            ),
-            nn.GroupNorm(groups, mid_ch),
-            nn.SiLU(inplace=True),
-
-            # project
-            nn.Conv2d(mid_ch, out_ch, 1, bias=False),
-            nn.GroupNorm(groups, out_ch),
-        )
-
-    def forward(self, x):
-        return self.block(x)
-    
 class SEBlock(nn.Module):
 
     def __init__(self, channels, reduction=16):
