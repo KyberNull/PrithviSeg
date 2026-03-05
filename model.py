@@ -144,7 +144,7 @@ class ASPP(nn.Module):
         x = torch.cat([p1, p2, p3, p4, p5], dim=1)
 
         return self.project(x)
-    
+
 class DilatedMBConv(nn.Module):
     def __init__(self, in_ch, out_ch, dilation, expand_ratio=4, groups=8):
         super().__init__()
