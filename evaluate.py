@@ -8,8 +8,9 @@ from model import UNet
 import numpy
 from rich.logging import RichHandler
 import torch
-from torchvision import datasets
+from torch import nn
 from torch.utils.data import DataLoader
+from torchvision import datasets
 from tqdm import tqdm
 from transforms import EvalTransforms, IMAGENET_MEAN, IMAGENET_STD
 
@@ -30,6 +31,7 @@ def test_model():
     testData = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = EvalTransforms())
     testLoader = DataLoader(dataset=testData, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, batch_size=NUM_BATCHES, persistent_workers=NUM_WORKERS > 0)
 
+    criterion = nn.CrossEntropyLoss(ignore_index=255)
 
     model = UNet(NUM_CLASSES).to(device=device, non_blocking=True)
     model = torch.compile(model=model)
@@ -69,16 +71,16 @@ def test_model():
                 results_to_view.append({"image":test_input_img, 
                                         "pred_mask": pred_mask, 
                                         "true_mask": true_mask})
-
-            dice_coefficient, iou = compute_means(preds, target, NUM_CLASSES)
-            total_DC += dice_coefficient
+            val_loss = criterion(preds, target)
+            _, iou = compute_means(preds, target, NUM_CLASSES)
+            total_CEL += val_loss.item()
             total_iou += iou
             count += 1
 
-    total_DC /= count
+    total_CEL /= count
     total_iou /= count
 
-    logger.info(f"mDC: {total_DC:.4f}")
+    logger.info(f"mCEL: {total_CEL:.4f}")
     logger.info(f"mIoU: {total_iou:.4f}")
 
 
