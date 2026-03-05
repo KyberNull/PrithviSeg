@@ -2,6 +2,17 @@
 
 import torch
 from torch import nn
+from torchvision.models import efficientnet_v2_s, EfficientNet_V2_S_Weights, feature_extraction
+
+backbone = efficientnet_v2_s(weights=EfficientNet_V2_S_Weights.IMAGENET1K_V1).features
+return_nodes = {
+        '1': 'skip1',
+        '2': 'skip2',
+        '3': 'skip3',
+        '5': 'skip4',
+        '7': 'bottleneck'
+    }
+encoder = feature_extraction.create_feature_extractor(backbone, return_nodes=return_nodes)
 
 class ConvBlock(nn.Module):
     '''
@@ -38,11 +49,11 @@ class Up(nn.Module):
 
 class UNet(nn.Module):
     '''A UNet architecture for semantic segmentation, consisting of an encoder, bottleneck, and decoder.'''
-    def __init__(self, num_classes, encoder):
+    def __init__(self, num_classes, backbone=encoder):
         super().__init__()
 
         # Encoder
-        self.encoder = encoder
+        self.encoder = backbone
 
         # Decoder
         self.up1 = Up(1280, 160, 512)
@@ -55,12 +66,12 @@ class UNet(nn.Module):
     def forward(self, x):
         input_size = x.shape[2:]
 
-        fetures = self.encoder(x)
-        s1 = fetures['skip1']
-        s2 = fetures['skip2']
-        s3 = fetures['skip3']
-        s4 = fetures['skip4']
-        b = fetures['bottleneck']
+        features = self.encoder(x)
+        s1 = features['skip1']
+        s2 = features['skip2']
+        s3 = features['skip3']
+        s4 = features['skip4']
+        b = features['bottleneck']
 
         x = self.up1(b, s4)
         x = self.up2(x, s3)

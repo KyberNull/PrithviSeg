@@ -1,7 +1,6 @@
 """Training loop for the segmentation model."""
 
 from config import get_train_config
-from itertools import cycle
 import logging
 from losses import dice_loss, compute_means
 from model import UNet
@@ -13,7 +12,6 @@ from torch import nn, optim, autocast
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 from torchvision import datasets
-from torchvision.models import efficientnet_v2_s, EfficientNet_V2_S_Weights, feature_extraction
 from tqdm import tqdm
 from transforms import TrainTransforms, EvalTransforms
 
@@ -34,6 +32,18 @@ pin_memory = False
 amp_dtype = torch.bfloat16
 logger = logging.getLogger(__name__)
 
+def freeze_encoder(model) -> None:
+    """Freeze encoder weights and keep BatchNorm stats fixed for transfer learning."""
+    encoder = getattr(model, "encoder", None)
+    if encoder is None:
+        orig_mod = getattr(model, "_orig_mod", None)
+        encoder = getattr(orig_mod, "encoder", None)
+    if encoder is None:
+        return
+
+    for p in encoder.parameters():
+        p.requires_grad = False
+    encoder.eval()
 
 def get_adamw_param_groups(model: nn.Module):
     decay_params = []
@@ -66,23 +76,29 @@ def save_checkpoint(model, optimizer, scheduler, scaler, epoch, path):
         "scaler_state": scaler.state_dict(),
     }, path)
 
-def validate(model, val_iterator, device, criterion):
+def validate(model, validation_loader, device, criterion):
     model.eval()
     running_val_loss = 0.0
     total_iou = 0.0
+    val_iterator = iter(validation_loader)
     with torch.no_grad():
         for i in range(NUM_VAL_SAMPLES):
-            val_input, val_output = next(val_iterator)
+            try:
+                val_input, val_output = next(val_iterator)
+            except StopIteration:
+                val_iterator = iter(validation_loader)
+                val_input, val_output = next(val_iterator)
 
             val_input, val_output = val_input.to(device, non_blocking=True), val_output.squeeze(1).to(device, non_blocking=True).long()
 
-            val_prediction = model(val_input)
+            with autocast(device_type=device.type, dtype=amp_dtype):
+                val_prediction = model(val_input)
             val_loss = criterion(val_prediction, val_output)
 
             running_val_loss += val_loss.item()
 
             _, iou = compute_means(val_prediction, val_output, NUM_CLASSES)
-            total_iou += iou
+            total_iou += iou.item()
 
         total_iou /= NUM_VAL_SAMPLES
 
@@ -92,6 +108,7 @@ def validate(model, val_iterator, device, criterion):
         logging.info(f"mIoU: {total_iou:.4f}")
 
         model.train()
+        freeze_encoder(model)
 
 def main(device, model_path):
     # GradScaler is only useful on CUDA where float16 gradients can underflow.
@@ -102,16 +119,9 @@ def main(device, model_path):
     vailidationDataset = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = EvalTransforms())
     validationLoader = DataLoader(dataset=vailidationDataset, batch_size=NUM_BATCHES, shuffle=False, num_workers=NUM_WORKERS, pin_memory=pin_memory)
 
-    backbone = efficientnet_v2_s(weights=EfficientNet_V2_S_Weights.IMAGENET1K_V1).features
-    return_nodes = {
-        '1': 'skip1',
-        '2': 'skip2',
-        '3': 'skip3',
-        '5': 'skip4',
-        '7': 'bottleneck'
-    }
-    encoder = feature_extraction.create_feature_extractor(backbone, return_nodes=return_nodes)
-    model = UNet(num_classes=NUM_CLASSES, encoder=encoder).to(device=device, non_blocking=True)
+    model = UNet(num_classes=NUM_CLASSES).to(device=device, non_blocking=True)
+    freeze_encoder(model)
+
     optimizer = optim.AdamW(get_adamw_param_groups(model), lr=LEARNING_RATE)
     model = torch.compile(model)
     warmup_steps = min(max(0, WARMUP_EPOCHS * len(trainLoader)), max(0, NUM_EPOCHS * len(trainLoader) - 1))
@@ -130,8 +140,6 @@ def main(device, model_path):
     criterion = nn.CrossEntropyLoss(ignore_index=255)
 
     start_epoch = 0
-    val_iterator = cycle(validationLoader) # Cycle loops around the iterable and keeps memory of the last position.
-
     try:
         # Resume model, optimizer, scheduler, and scaler states to continue training seamlessly.
         ckpt = torch.load(model_path, map_location=device)
@@ -149,6 +157,7 @@ def main(device, model_path):
         logger.warning("Training from scratch.")
 
     model.train()
+    freeze_encoder(model)
     for epoch in range(start_epoch, NUM_EPOCHS):
         epoch_bar = tqdm(trainLoader, desc=f"Epoch {epoch+1}/{NUM_EPOCHS}", leave=True, disable=not sys.stdout.isatty(), position=0)
         running_loss = 0.0
@@ -187,7 +196,7 @@ def main(device, model_path):
         
         # Validation loop
         if (epoch + 1) % VAL_INTERVAL == 0:
-            validate(model, val_iterator, device, criterion)
+            validate(model, validationLoader, device, criterion)
         
         #TODO: Maybe save best model and current model
         save_checkpoint(model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler, epoch=epoch, path=MODEL_PATH)

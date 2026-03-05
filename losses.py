@@ -30,35 +30,31 @@ def dice_loss(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth
 
 def compute_means(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth = 1e-8):
     target = target.long()
-    # Ignore regions are excluded from both predictions and targets before metrics.
-    valid_mask = (target != 255)
-    safe_target = target.clone()
-    safe_target[~valid_mask] = 0
-
     pred_labels = torch.argmax(pred, dim=1)
-    pred_labels[~valid_mask] = 0
+    # Ignore VOC's 255 label and compute class stats from a compact confusion matrix.
+    valid_mask = (target != 255)
+    if not valid_mask.any():
+        zero = pred.new_tensor(0.0)
+        return zero, zero
 
-    pred_onehot = torch.nn.functional.one_hot(pred_labels, num_classes)
-    pred_onehot = pred_onehot.permute(0, 3, 1, 2).float()
+    target_valid = target[valid_mask]
+    pred_valid = pred_labels[valid_mask]
 
-    target_onehot = torch.nn.functional.one_hot(safe_target, num_classes)
-    target_onehot = target_onehot.permute(0, 3, 1, 2).float()
+    indices = target_valid * num_classes + pred_valid
+    confusion = torch.bincount(indices, minlength=num_classes * num_classes)
+    confusion = confusion.reshape(num_classes, num_classes).float()
 
-    valid_mask = valid_mask.unsqueeze(1)
+    true_positive = confusion.diag()
+    pred_sum = confusion.sum(dim=0)
+    target_sum = confusion.sum(dim=1)
 
-    pred_onehot = pred_onehot * valid_mask
-    target_onehot = target_onehot * valid_mask
-
-    intersection = (pred_onehot * target_onehot).sum(dim=(2, 3))
-    pred_sum = pred_onehot.sum(dim=(2, 3))
-    target_sum = target_onehot.sum(dim=(2, 3))
-
-    dice = (2 * intersection + smooth) / (pred_sum + target_sum + smooth)
-    union = pred_sum + target_sum - intersection
-    iou = (intersection + smooth) / (union + smooth)
+    dice = (2 * true_positive + smooth) / (pred_sum + target_sum + smooth)
+    union = pred_sum + target_sum - true_positive
+    iou = (true_positive + smooth) / (union + smooth)
 
     class_present = (pred_sum + target_sum) > 0
-    dice = (dice * class_present).sum(dim=1) / class_present.sum(dim=1).clamp_min(1)
-    iou = (iou * class_present).sum(dim=1) / class_present.sum(dim=1).clamp_min(1)
+    if not class_present.any():
+        zero = pred.new_tensor(0.0)
+        return zero, zero
 
-    return dice.mean(), iou.mean()
+    return dice[class_present].mean(), iou[class_present].mean()
