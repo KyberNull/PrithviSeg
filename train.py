@@ -13,6 +13,7 @@ from torch import nn, optim, autocast
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 from torchvision import datasets
+from torchvision.models import efficientnet_v2_s, EfficientNet_V2_S_Weights, feature_extraction
 from tqdm import tqdm
 from transforms import TrainTransforms, EvalTransforms
 
@@ -101,7 +102,16 @@ def main(device, model_path):
     vailidationDataset = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = EvalTransforms())
     validationLoader = DataLoader(dataset=vailidationDataset, batch_size=NUM_BATCHES, shuffle=False, num_workers=NUM_WORKERS, pin_memory=pin_memory)
 
-    model = UNet(NUM_CLASSES).to(device)
+    backbone = efficientnet_v2_s(weights=EfficientNet_V2_S_Weights.IMAGENET1K_V1).features
+    return_nodes = {
+        '1': 'skip1',
+        '2': 'skip2',
+        '3': 'skip3',
+        '5': 'skip4',
+        '7': 'bottleneck'
+    }
+    encoder = feature_extraction.create_feature_extractor(backbone, return_nodes=return_nodes)
+    model = UNet(num_classes=NUM_CLASSES, encoder=encoder).to(device=device, non_blocking=True)
     optimizer = optim.AdamW(get_adamw_param_groups(model), lr=LEARNING_RATE)
     model = torch.compile(model)
     warmup_steps = min(max(0, WARMUP_EPOCHS * len(trainLoader)), max(0, NUM_EPOCHS * len(trainLoader) - 1))

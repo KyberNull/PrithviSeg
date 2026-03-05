@@ -36,49 +36,36 @@ class Up(nn.Module):
         x = torch.cat([x, skip], dim=1)
         return self.conv(x)
 
-class Down(nn.Module):
-    '''A downsampling block that applies max pooling followed by a convolutional block.'''
-    def __init__(self, in_ch: int, out_ch: int):
-        super().__init__()
-        self.pool = nn.MaxPool2d(2)
-        self.conv = ConvBlock(in_ch, out_ch)
-
-    def forward(self, x):
-        return self.conv(self.pool(x))
-
 class UNet(nn.Module):
     '''A UNet architecture for semantic segmentation, consisting of an encoder, bottleneck, and decoder.'''
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, encoder):
         super().__init__()
 
         # Encoder
-        self.enc1 = ConvBlock(3, 32)
-        self.enc2 = Down(32, 64)
-        self.enc3 = Down(64, 128)
-        self.enc4 = Down(128, 256)
-
-        # Bottleneck
-        self.bottleneck = Down(256, 512)
+        self.encoder = encoder
 
         # Decoder
-        self.up1 = Up(512, 256, 256)
-        self.up2 = Up(256, 128, 128)
-        self.up3 = Up(128, 64, 64)
-        self.up4 = Up(64, 32, 32)
+        self.up1 = Up(1280, 160, 512)
+        self.up2 = Up(512, 64, 256)
+        self.up3 = Up(256, 48, 128)
+        self.up4 = Up(128, 24, 64)
 
-        self.head = nn.Conv2d(32, num_classes, 1)
+        self.head = nn.Conv2d(64, num_classes, 1)
 
     def forward(self, x):
-        s1 = self.enc1(x)
-        s2 = self.enc2(s1)
-        s3 = self.enc3(s2)
-        s4 = self.enc4(s3)
+        input_size = x.shape[2:]
 
-        b = self.bottleneck(s4)
+        fetures = self.encoder(x)
+        s1 = fetures['skip1']
+        s2 = fetures['skip2']
+        s3 = fetures['skip3']
+        s4 = fetures['skip4']
+        b = fetures['bottleneck']
 
         x = self.up1(b, s4)
         x = self.up2(x, s3)
         x = self.up3(x, s2)
         x = self.up4(x, s1)
-
-        return self.head(x)
+        x = self.head(x)
+        x = nn.functional.interpolate(x, size=input_size, mode='bilinear', align_corners=False)
+        return x
