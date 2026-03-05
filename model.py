@@ -33,17 +33,15 @@ class ConvBlock(nn.Module):
         return x
 
 class Up(nn.Module):
-    '''An upsampling block that applies bilinear interpolation to upsample the input,
-    concatenates it with the corresponding skip connection, and applies a convolutional block.'''
+    '''An upsampling block that uses transposed convolution,
+    concatenates with the matching skip connection, and refines features with ConvBlock.'''
     def __init__(self, in_ch: int, skip_ch: int, out_ch: int):
         super().__init__()
-        self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
-        self.proj = nn.Conv2d(in_ch, in_ch // 2, kernel_size=1, bias=False)
+        self.up = nn.ConvTranspose2d(in_ch, in_ch // 2, kernel_size=2, stride=2, bias=False)
         self.conv = ConvBlock(in_ch // 2 + skip_ch, out_ch)
 
     def forward(self, x, skip):
         x = self.up(x)
-        x = self.proj(x)
         x = torch.cat([x, skip], dim=1)
         return self.conv(x)
 
@@ -62,6 +60,7 @@ class UNet(nn.Module):
         self.up4 = Up(128, 24, 64)
 
         self.head = nn.Conv2d(64, num_classes, 1)
+        self.logits_up = nn.ConvTranspose2d(num_classes, num_classes, kernel_size=2, stride=2)
 
     def forward(self, x):
         input_size = x.shape[2:]
@@ -78,5 +77,9 @@ class UNet(nn.Module):
         x = self.up3(x, s2)
         x = self.up4(x, s1)
         x = self.head(x)
-        x = nn.functional.interpolate(x, size=input_size, mode='bilinear', align_corners=False)
+        x = self.logits_up(x)
+
+        # Guard against odd input sizes that can create off-by-one shape differences.
+        if x.shape[2:] != input_size:
+            x = x[:, :, :input_size[0], :input_size[1]]
         return x
