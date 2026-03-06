@@ -1,6 +1,7 @@
 """Evaluation and qualitative visualization utilities for model predictions."""
 
 from config import get_eval_config
+from dataset import geospatial_dataset
 import logging
 from losses import compute_means
 import matplotlib.pyplot as plt
@@ -27,8 +28,11 @@ results_to_view = []
 logger = logging.getLogger(__name__)
 
 def test_model():
+
+    test_img_dir = "data/geospatial_data/CH3/processed_datasets"
+    test_mask_dir = "data/geospatial_data/CH3/processed_masks"
         
-    testData = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = EvalTransforms())
+    testData = geospatial_dataset(img_dir=test_img_dir, img_mask=test_mask_dir, transform=EvalTransforms())
     testLoader = DataLoader(dataset=testData, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, batch_size=NUM_BATCHES, persistent_workers=NUM_WORKERS > 0)
 
     criterion = nn.CrossEntropyLoss(ignore_index=255)
@@ -59,7 +63,7 @@ def test_model():
             test_input = test_input.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
             # Convert masks from [N, 1, H, W] to [N, H, W] class ids.
-            target = target.squeeze(1)
+            target = target.squeeze(1).long()
             preds = model(test_input)
 
             if (len(results_to_view) < MAX_EXAMPLES):
