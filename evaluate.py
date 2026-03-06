@@ -102,12 +102,12 @@ def view_results():
 
         plt.subplot(1,3,2)
         true_mask = numpy.ma.masked_equal(data["true_mask"], IGNORE_LABEL)
-        plt.imshow(true_mask, cmap="tab20", vmin=0, vmax=NUM_CLASSES - 1, interpolation="nearest")
+        plt.imshow(true_mask, cmap="gray", vmin=0, vmax=NUM_CLASSES - 1, interpolation="nearest")
         plt.title("Ground Truth")
         plt.axis("off")
 
         plt.subplot(1,3,3)
-        plt.imshow(data["pred_mask"], cmap="tab20", vmin=0, vmax=NUM_CLASSES - 1, interpolation="nearest")
+        plt.imshow(data["pred_mask"], cmap="gray", vmin=0, vmax=NUM_CLASSES - 1, interpolation="nearest")
         plt.title("Predicted Mask")
         plt.axis("off")
 
