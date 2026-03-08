@@ -95,7 +95,7 @@ class UNet(nn.Module):
 
         self.head = nn.Conv2d(64, num_classes, 1)
         self.logits_up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-        self.context = MBConvBlock(1280, 1280)  # Context module at the bottleneck
+        self.context = ASPP(1280, 1280)  # Context module at the bottleneck
 
     def forward(self, x):
         input_size = x.shape[2:]
@@ -123,7 +123,7 @@ class UNet(nn.Module):
     
 class ASPP(nn.Module):
 
-    def __init__(self, in_ch, out_ch, rates=(3,6,9)):
+    def __init__(self, in_ch, out_ch, rates=(1,2,3)):
         super().__init__()
 
         self.branch1 = nn.Sequential(
