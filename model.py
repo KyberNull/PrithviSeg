@@ -84,6 +84,7 @@ class Up(nn.Module):
         self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
         self.reduce = nn.Conv2d(in_ch, in_ch // 2, kernel_size=1, bias=False)
         self.conv = ConvBlock(in_ch // 2 + skip_ch, out_ch)
+        self.gate = GatedSkip(skip_ch, in_ch // 2, inter_ch=skip_ch // 2)
 
     def forward(self, x, skip):
         x = self.up(x)
@@ -92,6 +93,7 @@ class Up(nn.Module):
             x = torch.nn.functional.interpolate(
                 x, size=skip.shape[2:], mode='bilinear', align_corners=False
             )
+        skip = self.gate(skip, x)
         x = torch.cat([x, skip], dim=1)
         return self.conv(x)
 
@@ -209,3 +211,26 @@ class SEBlock(nn.Module):
         w = self.fc(w)
 
         return x * w
+
+class GatedSkip(nn.Module):
+
+    def __init__(self, skip_ch, decoder_ch, inter_ch):
+        super().__init__()
+
+        self.skip_proj = nn.Conv2d(skip_ch, inter_ch, 1, bias=False)
+        self.dec_proj  = nn.Conv2d(decoder_ch, inter_ch, 1, bias=False)
+
+        self.psi = nn.Sequential(
+            nn.Conv2d(inter_ch, 1, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, skip, decoder):
+
+        g1 = self.skip_proj(skip)
+        g2 = self.dec_proj(decoder)
+
+        gate = nn.ReLU()(g1 + g2)
+        gate = self.psi(gate)
+
+        return skip * gate
