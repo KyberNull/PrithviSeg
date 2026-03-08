@@ -131,8 +131,8 @@ class ASPP(nn.Module):
         concat_ch = out_ch * 5
 
         self.project = nn.Sequential(
-            nn.Conv2d(concat_ch, in_ch, 1, bias=False),
-            nn.GroupNorm(8, in_ch),
+            nn.Conv2d(concat_ch, out_ch, 1, bias=False),
+            nn.GroupNorm(8, out_ch),
             nn.SiLU(inplace=True)
         )
 
@@ -185,14 +185,17 @@ class UNet(nn.Module):
         self.encoder = backbone
 
         # Decoder
-        self.up1 = Up(1280, 160, 512)
+        self.up1 = Up(1280, 128, 512)
         self.up2 = Up(512, 64, 256)
         self.up3 = Up(256, 48, 128)
         self.up4 = Up(128, 24, 64)
 
         self.head = nn.Conv2d(64, num_classes, 1)
         self.logits_up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
+        
         self.aspp = ASPP(160, 128)  # Context module at the bottleneck
+        # ASPP returns out_ch features, so SE width follows that output channel count.
+        self.se = SEBlock(128)
 
     def forward(self, x):
         input_size = x.shape[2:]
@@ -204,7 +207,8 @@ class UNet(nn.Module):
         s4 = features['skip4']
         b = features['bottleneck']
 
-        s4 = self.aspp(s4)  # Enhance bottleneck features with ASPP
+        s4 = self.aspp(s4)  # Enhance skip4 features with ASPP
+        s4 = self.se(s4)    # Apply SE attention to ASPP features
 
         x = self.up1(b, s4)
         x = self.up2(x, s3)
