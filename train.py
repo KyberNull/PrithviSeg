@@ -117,10 +117,10 @@ def main(device, model_path):
 
 
     #Importing the trainning and validation villages
-    train_img_dir = "data/geospatial_data/CH1/processed_datasets"
-    train_mask_dir = "data/geospatial_data/CH1/processed_masks"
-    val_img_dir = "data/geospatial_data/CH2/processed_datasets"
-    val_mask_dir = "data/geospatial_data/CH2/processed_masks"
+    train_img_dir = "data/CH1/processed_datasets"
+    train_mask_dir = "data/CH1/processed_masks"
+    val_img_dir = "data/CH2/processed_datasets"
+    val_mask_dir = "data/CH2/processed_datasets"
 
     trainDataset = geospatial_dataset(img_dir=train_img_dir, img_mask=train_mask_dir, transform=TrainTransform)
     trainLoader = DataLoader(dataset=trainDataset, batch_size=NUM_BATCHES, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, persistent_workers=NUM_WORKERS > 0)

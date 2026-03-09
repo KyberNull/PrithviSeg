@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 def test_model():
 
-    test_img_dir = "data/geospatial_data/CH3_OnlyRoads/processed_datasets"
-    test_mask_dir = "data/geospatial_data/CH3_OnlyRoads/processed_masks"
+    test_img_dir = "data/CH3/processed_datasets"
+    test_mask_dir = "data/CH3/processed_datasets"
         
     testData = geospatial_dataset(img_dir=test_img_dir, img_mask=test_mask_dir, transform=EvalTransform)
     testLoader = DataLoader(dataset=testData, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, batch_size=NUM_BATCHES, persistent_workers=NUM_WORKERS > 0)
