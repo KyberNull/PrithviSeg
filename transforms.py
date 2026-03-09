@@ -14,20 +14,18 @@ TrainTransform = A.Compose([
     A.HorizontalFlip(p=0.3),
     A.VerticalFlip(p=0.3),
     A.Rotate(30),
-
-
-    A.Normalize(mean = IMAGENET_MEAN, std = IMAGENET_STD),
-
     A.CoarseDropout(),
-
-    A.ColorJitter(brightness=0.8)
+    A.ColorJitter(brightness=0.8),
+    A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+    ToTensorV2(),
 ])
 
 
 EvalTransform = A.Compose([
     A.Resize(SIZE[0], SIZE[1]),
-    A.HorizontalFlip(p = 0.5),
-    A.Normalize(mean = IMAGENET_MEAN, std = IMAGENET_STD)
+    A.HorizontalFlip(p=0.5),
+    A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
+    ToTensorV2(),
 ])
 
 

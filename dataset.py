@@ -2,9 +2,9 @@
 
 from torch.utils.data import Dataset
 from transforms import TrainTransform
+import numpy as np
 import torch
 from PIL import Image
-from torchvision import tv_tensors
 import os
 
 class geospatial_dataset(Dataset):
@@ -29,19 +29,16 @@ class geospatial_dataset(Dataset):
         img_path = os.path.join(self.img_dir, self.images[idx])
         mask_path = os.path.join(self.img_mask, self.masks[idx])
 
-        image = Image.open(img_path).convert('RGB') 
-        mask = Image.open(mask_path).convert('L')
-
-
-        image = tv_tensors.Image(image)
-        mask = tv_tensors.Mask(mask)
+        image = np.array(Image.open(img_path).convert('RGB'))
+        mask = np.array(Image.open(mask_path).convert('L'))
 
         if self.transform:
-            image, mask = self.transform(image, mask)
+            transformed = self.transform(image=image, mask=mask)
+            image = transformed['image']
+            mask = transformed['mask']
         else:
-            import torchvision.transforms.v2.functional as F
-            image = F.to_dtype(image, torch.float32, scale=True)
-            mask = F.to_dtype(mask, torch.long)
+            image = torch.from_numpy(image).permute(2, 0, 1).float() / 255.0
+            mask = torch.from_numpy(mask).long()
 
         mask = mask.float()
         if mask.max() > 1:
