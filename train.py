@@ -3,7 +3,7 @@
 from config import get_train_config
 from dataset import geospatial_dataset
 import logging
-from losses import dice_loss, compute_means
+from losses import dice_loss, compute_means, dice_loss
 from model import UNet
 from rich.logging import RichHandler
 import signal
@@ -12,7 +12,6 @@ import torch
 from torch import nn, optim, autocast
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
-from torchvision import datasets
 from tqdm import tqdm
 from transforms import TrainTransform, EvalTransform
 
@@ -186,7 +185,7 @@ def main(device, model_path):
                 loss = criterion(prediction, output)
                 
                 # Combine pixel-wise CE with overlap-aware Dice for better segmentation quality.
-                loss += dice_loss(prediction, output, NUM_CLASSES)
+                loss += 0.5*dice_loss(prediction, output, NUM_CLASSES) + 0.5*cl_dice_loss(prediction, output, NUM_CLASSES)
             
             scaler.scale(loss).backward()
             scale_before_step = scaler.get_scale()

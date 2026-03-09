@@ -2,6 +2,7 @@
 
 import torch
 
+
 def dice_loss(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth=1e-8):
     pred = torch.softmax(pred, dim=1)
 
