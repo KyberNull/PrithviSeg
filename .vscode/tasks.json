@@ -1,7 +1,6 @@
-
 {
-// See https://go.microsoft.com/fwlink/?LinkId=733558
-// for the documentation about the tasks.json format
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
     "version": "2.0.0",
     "tasks": [
         {
@@ -18,6 +17,12 @@
             "label": "Evaluate",
             "type": "shell",
             "command": "PYTHON_GIL=1 uv run evaluate.py",
+            "problemMatcher": []
+        },
+        {
+            "label": "Pretrain",
+            "type": "shell",
+            "command": "PYTHON_GIL=1 uv run pretrain.py",
             "problemMatcher": []
         }
     ]

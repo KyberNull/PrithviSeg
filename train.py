@@ -33,7 +33,7 @@ amp_dtype = torch.bfloat16
 logger = logging.getLogger(__name__)
 
 def freeze_encoder(model) -> None:
-    """Freeze encoder weights and keep BatchNorm stats fixed for transfer learning."""
+    """Freeze encoder weights except the last two blocks for transfer learning."""
     encoder = getattr(model, "encoder", None)
     if encoder is None:
         orig_mod = getattr(model, "_orig_mod", None)
@@ -45,22 +45,57 @@ def freeze_encoder(model) -> None:
         p.requires_grad = False
     encoder.eval()
 
+    # EfficientNetV2-S encoder blocks are under encoder.features.<idx>; keep the last two trainable.
+    trainable_stage_ids = sorted(
+        {
+            int(name.split(".")[1])
+            for name, _ in encoder.named_parameters()
+            if name.startswith("features.") and len(name.split(".")) > 2 and name.split(".")[1].isdigit()
+        }
+    )[-2:]
+
+    for name, p in encoder.named_parameters():
+        if any(name.startswith(f"features.{idx}.") for idx in trainable_stage_ids):
+            p.requires_grad = True
+
+    for idx in trainable_stage_ids:
+        block = getattr(getattr(encoder, "features", None), str(idx), None)
+        if block is not None:
+            block.train()
+
 def get_adamw_param_groups(model: nn.Module):
-    decay_params = []
-    no_decay_params = []
+    backbone_lr = LEARNING_RATE * 0.1
+    head_decay_params = []
+    head_no_decay_params = []
+    enc_decay_params = []
+    enc_no_decay_params = []
 
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
+        is_encoder_param = name.startswith("encoder.")
         if param.ndim <= 1 or name.endswith(".bias"):
-            no_decay_params.append(param)
+            if is_encoder_param:
+                enc_no_decay_params.append(param)
+            else:
+                head_no_decay_params.append(param)
         else:
-            decay_params.append(param)
+            if is_encoder_param:
+                enc_decay_params.append(param)
+            else:
+                head_decay_params.append(param)
 
-    return [
-        {"params": decay_params, "weight_decay": WEIGHT_DECAY},
-        {"params": no_decay_params, "weight_decay": 0.0},
-    ]
+    param_groups = []
+    if head_decay_params:
+        param_groups.append({"params": head_decay_params, "weight_decay": WEIGHT_DECAY, "lr": LEARNING_RATE})
+    if head_no_decay_params:
+        param_groups.append({"params": head_no_decay_params, "weight_decay": 0.0, "lr": LEARNING_RATE})
+    if enc_decay_params:
+        param_groups.append({"params": enc_decay_params, "weight_decay": WEIGHT_DECAY, "lr": backbone_lr})
+    if enc_no_decay_params:
+        param_groups.append({"params": enc_no_decay_params, "weight_decay": 0.0, "lr": backbone_lr})
+
+    return param_groups
 
 def handle_shutdown(sig, frame):
     global shutdown_requested

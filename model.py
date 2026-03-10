@@ -23,55 +23,20 @@ encoder = feature_extraction.create_feature_extractor(backbone, return_nodes=ret
 
 class ConvBlock(nn.Module):
     """Two conv layers with GroupNorm + SiLU."""
-    def __init__(self, in_ch, out_ch):
+    def __init__(self, in_ch, out_ch, groups=8, dilation=1):
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
-            nn.GroupNorm(8, out_ch),
+            nn.Conv2d(in_ch, out_ch, 3, padding=dilation, dilation=dilation, bias=False),
+            nn.GroupNorm(groups, out_ch),
             nn.SiLU(inplace=True),
-            nn.Conv2d(out_ch, out_ch, 3, padding=1, bias=False),
-            nn.GroupNorm(8, out_ch),
+            nn.Conv2d(out_ch, out_ch, 3, padding=dilation, dilation=dilation, bias=False),
+            nn.GroupNorm(groups, out_ch),
             nn.SiLU(inplace=True)
         )
 
     def forward(self, x):
         return self.conv(x)
     
-class MBConvBlock(nn.Module):
-    """Mobile inverted bottleneck: expand → depthwise → project."""
-    def __init__(self, in_ch, out_ch, expand_ratio=4, groups=4, dilation=1):
-        super().__init__()
-        mid_ch = in_ch * expand_ratio
-        self.block = nn.Sequential(
-            nn.Conv2d(in_ch, mid_ch, 1, bias=False),
-            nn.GroupNorm(groups, mid_ch),
-            nn.SiLU(inplace=True),
-            nn.Conv2d(mid_ch, mid_ch, 3, padding=dilation, dilation=dilation, groups=mid_ch, bias=False),
-            nn.GroupNorm(groups, mid_ch),
-            nn.SiLU(inplace=True),
-            nn.Conv2d(mid_ch, out_ch, 1, bias=False),
-            nn.GroupNorm(groups, out_ch),
-        )
-
-    def forward(self, x):
-        return self.block(x)
-    
-class SEBlock(nn.Module):
-    """Channel attention (Squeeze-and-Excite)."""
-    def __init__(self, channels, reduction=8):
-        super().__init__()
-        self.pool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Sequential(
-            nn.Conv2d(channels, channels // reduction, 1),
-            nn.SiLU(inplace=True),
-            nn.Conv2d(channels // reduction, channels, 1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        w = self.pool(x)
-        w = self.fc(w)
-        return x * w
 
 # ===========================
 # Gate for skip connections
@@ -101,58 +66,6 @@ class GatedSkip(nn.Module):
         gate = self.psi(gate)
 
         return skip * gate
-
-# ===========================
-# ASPP Context Module
-# ===========================
-    
-class ASPP(nn.Module):
-
-    def __init__(self, in_ch, out_ch, rates=(2,4,6)):
-        super().__init__()
-
-        self.branch1 = nn.Sequential(
-            nn.Conv2d(in_ch, out_ch, 1, bias=False),
-            nn.GroupNorm(8, out_ch),
-            nn.SiLU(inplace=True)
-        )
-
-        self.branch2 = MBConvBlock(in_ch, out_ch, groups=8, dilation=rates[0])
-        self.branch3 = MBConvBlock(in_ch, out_ch, groups=8, dilation=rates[1])
-        self.branch4 = MBConvBlock(in_ch, out_ch, groups=8, dilation=rates[2])
-
-        self.pool = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(in_ch, out_ch, 1, bias=False),
-            nn.GroupNorm(8, out_ch),
-            nn.SiLU(inplace=True)
-        )
-
-        concat_ch = out_ch * 5
-
-        self.project = nn.Sequential(
-            nn.Conv2d(concat_ch, out_ch, 1, bias=False),
-            nn.GroupNorm(8, out_ch),
-            nn.SiLU(inplace=True)
-        )
-
-    def forward(self, x):
-
-        h, w = x.shape[2:]
-
-        p1 = self.branch1(x)
-        p2 = self.branch2(x)
-        p3 = self.branch3(x)
-        p4 = self.branch4(x)
-
-        p5 = self.pool(x)
-        p5 = torch.nn.functional.interpolate(
-            p5, size=(h, w), mode="bilinear", align_corners=False
-        )
-
-        x = torch.cat([p1,p2,p3,p4,p5], dim=1)
-
-        return self.project(x)
 
 class Up(nn.Module):
     '''An upsampling block that uses bilinear upsampling,
@@ -185,17 +98,13 @@ class UNet(nn.Module):
         self.encoder = backbone
 
         # Decoder
-        self.up1 = Up(1280, 128, 512)
+        self.up1 = Up(1280, 160, 512)
         self.up2 = Up(512, 64, 256)
         self.up3 = Up(256, 48, 128)
         self.up4 = Up(128, 24, 64)
 
         self.head = nn.Conv2d(64, num_classes, 1)
         self.logits_up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-        
-        self.aspp = ASPP(160, 128)  # Context module at the bottleneck
-        # ASPP returns out_ch features, so SE width follows that output channel count.
-        self.se = SEBlock(128)
 
     def forward(self, x):
         input_size = x.shape[2:]
@@ -206,9 +115,6 @@ class UNet(nn.Module):
         s3 = features['skip3']
         s4 = features['skip4']
         b = features['bottleneck']
-
-        s4 = self.aspp(s4)  # Enhance skip4 features with ASPP
-        s4 = self.se(s4)    # Apply SE attention to ASPP features
 
         x = self.up1(b, s4)
         x = self.up2(x, s3)
