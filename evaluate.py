@@ -1,7 +1,7 @@
 """Evaluation and qualitative visualization utilities for model predictions."""
 
-from config import get_eval_config
 import logging
+import os
 from losses import compute_means
 import matplotlib.pyplot as plt
 from model import UNet
@@ -14,13 +14,12 @@ from torchvision import datasets
 from tqdm import tqdm
 from transforms import EvalTransforms, IMAGENET_MEAN, IMAGENET_STD
 
-config = get_eval_config()
-MODEL_PATH = config.model_path
-NUM_WORKERS = config.num_workers
-NUM_BATCHES = config.num_batches
-NUM_CLASSES = config.num_classes
-MAX_EXAMPLES = config.max_examples
-IGNORE_LABEL = config.ignore_label
+MODEL_PATH = "model.pt"
+NUM_WORKERS = min(4, os.cpu_count() or 1)
+NUM_BATCHES = 16
+NUM_CLASSES = 21
+MAX_EXAMPLES = 10
+IGNORE_LABEL = 255
 
 pin_memory = False
 results_to_view = []

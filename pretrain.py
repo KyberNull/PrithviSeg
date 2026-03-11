@@ -4,7 +4,6 @@ This script is intentionally similar to train.py, but uses SBD for source-task
 pretraining so train.py can be reserved for downstream/domain training.
 """
 
-from config import get_train_config
 import logging
 from losses import dice_loss, compute_means
 from model import UNet
@@ -23,17 +22,16 @@ from tqdm import tqdm
 from transforms import TrainTransforms, EvalTransforms
 
 
-config = get_train_config()
-LEARNING_RATE = config.learning_rate
-WEIGHT_DECAY = config.weight_decay
-WARMUP_EPOCHS = config.warmup_epochs
+LEARNING_RATE = 0.001
+WEIGHT_DECAY = 0.001
+WARMUP_EPOCHS = 5
 PRETRAIN_MODEL_PATH = "model.pt"
-NUM_BATCHES = config.num_batches
-NUM_CLASSES = config.num_classes
+NUM_BATCHES = 32
+NUM_CLASSES = 21
 NUM_EPOCHS = 20
-NUM_WORKERS = config.num_workers
-VAL_INTERVAL = config.val_interval
-NUM_VAL_SAMPLES = config.num_val_samples
+NUM_WORKERS = min(4, os.cpu_count() or 1)
+VAL_INTERVAL = 10
+NUM_VAL_SAMPLES = 280
 CHECKPOINT_INTERVAL = 1
 CHECKPOINT_RAM_HEADROOM_GB = 0.1
 

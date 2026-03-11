@@ -1,24 +1,7 @@
-"""Environment-based configuration helpers."""
+"""Configuration helpers."""
 
 from dataclasses import dataclass
 import os
-from pathlib import Path
-
-from dotenv import load_dotenv
-
-
-def _load_environment() -> None:
-    root_dir = Path(__file__).resolve().parent
-    env_example_path = root_dir / ".env.example"
-    env_path = root_dir / ".env"
-
-    if env_example_path.exists():
-        load_dotenv(dotenv_path=env_example_path)
-
-    if env_path.exists():
-        load_dotenv(dotenv_path=env_path, override=True)
-
-_load_environment()
 
 
 def _get_int(name: str, default: int) -> int:
@@ -80,16 +63,16 @@ class EvalConfig:
 
 def get_train_config() -> TrainConfig:
     return TrainConfig(
-        learning_rate=_get_float("TRAIN_LEARNING_RATE", 0.003),
-        weight_decay=_get_float("TRAIN_WEIGHT_DECAY", 1e-4),
+        learning_rate=_get_float("TRAIN_LEARNING_RATE", 0.001),
+        weight_decay=_get_float("TRAIN_WEIGHT_DECAY", 0.001),
         warmup_epochs=_get_int("TRAIN_WARMUP_EPOCHS", 5),
         model_path=_get_str("MODEL_PATH", "model.pt"),
         batch_size=_get_int("TRAIN_BATCH_SIZE", 32),
         num_classes=_get_int("NUM_CLASSES", 21),
         num_epochs=_get_int("TRAIN_EPOCHS", 300),
         num_workers=_get_int("NUM_WORKERS", min(4, os.cpu_count() or 1)),
-        val_interval=_get_int("VAL_INTERVAL", 5),
-        num_val_samples=_get_int("NUM_VAL_SAMPLES", 140),
+        val_interval=_get_int("VAL_INTERVAL", 10),
+        num_val_samples=_get_int("NUM_VAL_SAMPLES", 280),
     )
 
 

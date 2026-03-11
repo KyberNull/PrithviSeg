@@ -1,7 +1,7 @@
 """Training loop for the segmentation model."""
 
-from config import get_train_config
 import logging
+import os
 from losses import dice_loss, compute_means
 from model import UNet
 from rich.logging import RichHandler
@@ -15,17 +15,20 @@ from torchvision import datasets
 from tqdm import tqdm
 from transforms import TrainTransforms, EvalTransforms
 
-config = get_train_config()
-LEARNING_RATE = config.learning_rate
-WEIGHT_DECAY = config.weight_decay
-WARMUP_EPOCHS = config.warmup_epochs
-MODEL_PATH = config.model_path
-NUM_BATCHES = config.num_batches
-NUM_CLASSES = config.num_classes
-NUM_EPOCHS = config.num_epochs
-NUM_WORKERS = config.num_workers
-VAL_INTERVAL = config.val_interval
-NUM_VAL_SAMPLES = config.num_val_samples
+
+###-------CONSTANTS-------###
+LEARNING_RATE = 0.001
+WEIGHT_DECAY = 0.001
+WARMUP_EPOCHS = 5
+MODEL_PATH = "model.pt"
+NUM_BATCHES = 32
+NUM_CLASSES = 21
+NUM_EPOCHS = 300
+NUM_WORKERS = min(4, os.cpu_count() or 1)
+VAL_INTERVAL = 10
+NUM_VAL_SAMPLES = 280
+###-----------------------###
+
 
 shutdown_requested = False
 pin_memory = False
@@ -112,6 +115,7 @@ def save_checkpoint(model, optimizer, scheduler, scaler, epoch, path):
     }, path)
 
 def validate(model, validation_loader, device, criterion):
+    '''Validating the model continuously to prevent overfitting.'''
     model.eval()
     running_val_loss = 0.0
     total_iou = 0.0
