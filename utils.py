@@ -31,10 +31,10 @@ def freeze_encoder(model, encoder_lr):
 
 def setup_logging():
     logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    handlers=[RichHandler()],
-    force=True,
+        level=logging.INFO,
+        format="%(message)s",
+        handlers=[RichHandler()],
+        force=True,
     )
 
 def device_setup():
