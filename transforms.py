@@ -22,6 +22,8 @@ class EvalTransforms:
             if isinstance(image, dict):
                 sample = image
                 image, mask = sample['image'], sample['mask']
+                mask = mask - 1
+                mask[mask < 0] = 255
             else:
                 raise TypeError("Invalid arguments")
         image, mask = tv_tensors.Image(image), tv_tensors.Mask(mask)

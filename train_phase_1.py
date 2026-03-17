@@ -155,7 +155,7 @@ def get_dataloaders():
 	train_dataloader = DataLoader(
 		dataset=train_dataset,
 		batch_size=NUM_BATCHES,
-		shuffle=False,
+		shuffle=True,
 		num_workers=NUM_WORKERS,
 		pin_memory=pin_memory,
 		persistent_workers=NUM_WORKERS > 0

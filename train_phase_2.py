@@ -29,7 +29,7 @@ WEIGHT_DECAY = 0.001
 WARMUP_EPOCHS = 5
 MODEL_PATH = "model.pt"
 NUM_BATCHES = 8
-NUM_CLASSES = 6
+NUM_CLASSES = 7
 NUM_EPOCHS_PHASE_2 = 50
 NUM_EPOCHS = NUM_EPOCHS_PHASE_2 + NUM_EPOCHS_PHASE_1
 NUM_WORKERS = min(4, os.cpu_count() or 1)
@@ -280,7 +280,7 @@ def main(device, model_path):
 
 	model, optimizer, scheduler, scaler, start_epoch, train_loader, validation_loader = load_checkpoint(model_path, model)
 	model = torch.compile(model)
-	criterion = nn.CrossEntropyLoss()
+	criterion = nn.CrossEntropyLoss(ignore_index=255)
 
 	model.train()
 
