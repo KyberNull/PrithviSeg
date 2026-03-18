@@ -25,7 +25,7 @@ def freeze_encoder(model, encoder_lr):
         block.eval() 
 
         for name, m in block.named_modules():
-            if not isinstance(m, (nn.GroupNorm)):
+            if not isinstance(m, (nn.BatchNorm2d, nn.GroupNorm, nn.LayerNorm)):
                 for p in m.parameters():
                     p.requires_grad = True
 
