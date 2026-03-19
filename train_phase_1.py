@@ -25,12 +25,12 @@ LEARNING_RATE = 0.001
 WEIGHT_DECAY = 0.001
 WARMUP_EPOCHS = 5
 MODEL_PATH = "model.pt"
-NUM_BATCHES = 4
+NUM_BATCHES = 8
 NUM_CLASSES = 20
 NUM_EPOCHS_PHASE_1 = 20
 NUM_EPOCHS = NUM_EPOCHS_PHASE_1
 NUM_WORKERS = min(4, os.cpu_count() or 1)
-VAL_INTERVAL = 1
+VAL_INTERVAL = 5
 NUM_VAL_SAMPLES = 280
 CHECKPOINT_RAM_HEADROOM_GB = 0.1
 ###-----------------------###
@@ -142,31 +142,29 @@ def get_dataloaders():
 		root='./data/phase-1',
 		image_set='train_noval',
 		mode='boundaries',
-		download=True,
+		download=False,
 		transforms=TrainTransforms()
 	)
 	val_dataset = datasets.SBDataset(
 		root='./data/phase-1',
 		image_set='train',
 		mode='boundaries',
-		download=True,
+		download=False,
 		transforms=EvalTransforms()
 	)
 	train_dataloader = DataLoader(
 		dataset=train_dataset,
 		batch_size=NUM_BATCHES,
-		shuffle=True,
+		shuffle=False,
 		num_workers=NUM_WORKERS,
 		pin_memory=pin_memory,
 		persistent_workers=NUM_WORKERS > 0
 		)
 	val_dataloader = DataLoader(
 		dataset=val_dataset,
-		batch_size=NUM_BATCHES,
 		shuffle=False,
-		num_workers=NUM_WORKERS,
 		pin_memory=pin_memory,
-		persistent_workers=NUM_WORKERS > 0
+		persistent_workers=False
 		)
 	return train_dataloader, val_dataloader
 
