@@ -231,7 +231,7 @@ def get_dataloaders():
 		)
 	val_dataset = LoveDA(
 		root='./data/phase-2',
-		split = 'test',
+		split = 'val',
 		scene=['rural', 'urban'],
 		transforms=EvalTransforms(), #type: ignore
 		download=True,
