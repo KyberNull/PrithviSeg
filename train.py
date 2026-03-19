@@ -37,7 +37,6 @@ NUM_EPOCHS_PHASE_3 = 80
 NUM_WORKERS = min(4, os.cpu_count() or 1)
 VAL_INTERVAL = 1
 NUM_VAL_SAMPLES = 280
-CHECKPOINT_RAM_HEADROOM_GB = 0.1
 ###-----------------------###
 
 shutdown_requested = False
