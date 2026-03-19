@@ -33,7 +33,7 @@ NUM_CLASSES = 7
 NUM_EPOCHS_PHASE_2 = 50
 NUM_EPOCHS = NUM_EPOCHS_PHASE_2 + NUM_EPOCHS_PHASE_1
 NUM_WORKERS = min(4, os.cpu_count() or 1)
-VAL_INTERVAL = 1
+VAL_INTERVAL = 5
 NUM_VAL_SAMPLES = 150
 CHECKPOINT_RAM_HEADROOM_GB = 0.1
 ###-----------------------###
@@ -227,28 +227,26 @@ def get_dataloaders():
 		split = 'train',
 		scene=['rural', 'urban'],
 		transforms=TrainTransforms(), #type: ignore
-		download=True,
+		download=False,
 		)
 	val_dataset = LoveDA(
 		root='./data/phase-2',
 		split = 'val',
 		scene=['rural', 'urban'],
 		transforms=EvalTransforms(), #type: ignore
-		download=True,
+		download=False,
 		)
 	train_dataloader = DataLoader(
 		dataset=train_dataset,
 		batch_size=NUM_BATCHES,
-		shuffle=True,
+		shuffle=False,
 		num_workers=NUM_WORKERS,
 		pin_memory=pin_memory,
 		persistent_workers=NUM_WORKERS > 0,
 		)
 	val_dataloader = DataLoader(
 		dataset=val_dataset,
-		batch_size=NUM_BATCHES,
 		shuffle=False,
-		num_workers=NUM_WORKERS,
 		pin_memory=pin_memory,
 		)
 	return train_dataloader, val_dataloader
