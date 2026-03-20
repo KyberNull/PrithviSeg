@@ -51,7 +51,7 @@ def handle_shutdown(sig, frame):
 def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion):
 	epoch_bar = tqdm(
 		train_loader,
-		desc=f"Phase 2 Epoch {epoch + 1}/{NUM_EPOCHS}",
+		desc=f"[Phase 2] Epoch {epoch + 1}/{NUM_EPOCHS}",
 		leave=True,
 		disable=not sys.stdout.isatty(),
 		position=0,
