@@ -6,13 +6,13 @@ pretraining so train.py can be reserved for downstream/domain training.
 """
 
 import logging
-from losses import focal_loss
+from losses import dice_loss, compute_means
 from model import UNet
 import os
 import signal
 import sys
 import torch
-from torch import optim, autocast
+from torch import nn, optim, autocast
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -26,11 +26,11 @@ WEIGHT_DECAY = 0.001
 WARMUP_EPOCHS = 5
 MODEL_PATH = "model.pt"
 NUM_BATCHES = 8
-NUM_CLASSES = 20
+NUM_CLASSES = 21
 NUM_EPOCHS_PHASE_1 = 20
 NUM_EPOCHS = NUM_EPOCHS_PHASE_1
 NUM_WORKERS = min(4, os.cpu_count() or 1)
-VAL_INTERVAL = 5
+VAL_INTERVAL = 1
 NUM_VAL_SAMPLES = 280
 ###-----------------------###
 
@@ -45,7 +45,7 @@ def handle_shutdown(sig, frame):
 	logger.warning(f"Shutdown requested! Signal: {sig}")
 	shutdown_requested = True
 
-def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler):
+def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion):
 	epoch_bar = tqdm(
 		train_loader,
 		desc=f"Phase 1 Epoch {epoch + 1}/{NUM_EPOCHS}",
@@ -67,7 +67,8 @@ def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler):
 
 		with autocast(device_type=device.type, dtype=amp_dtype):
 			prediction = model(input_tensor)
-			loss = focal_loss(prediction, output_tensor, NUM_CLASSES)
+			loss = criterion(prediction, output_tensor)
+			loss += dice_loss(prediction, output_tensor, NUM_CLASSES)
 
 		if not torch.isfinite(loss):
 			logger.warning(f"Non-finite loss at epoch {epoch+1}, batch {batch}; skipping step.")
@@ -87,9 +88,10 @@ def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler):
 		avg_loss = running_loss / (batch + 1)
 		epoch_bar.set_postfix(loss=avg_loss, lr=scheduler.get_last_lr()[0])
 
-def validate(model, validation_loader, device):
+def validate(model, validation_loader, device, criterion):
 	model.eval()
 	running_val_loss = 0.0
+	total_iou = 0.0
 	val_iterator = iter(validation_loader)
 
 	with torch.no_grad():
@@ -105,13 +107,17 @@ def validate(model, validation_loader, device):
 
 			val_prediction = model(val_input)
 
-			val_loss = focal_loss(val_prediction, val_output, NUM_CLASSES)
+			val_loss = criterion(val_prediction, val_output)
 
 			running_val_loss += val_loss.item()
+			_, iou = compute_means(val_prediction, val_output, NUM_CLASSES)
+			total_iou += iou.item()
 
 		running_val_loss /= NUM_VAL_SAMPLES
+		total_iou /= NUM_VAL_SAMPLES
 
-		logger.info(f"Focal Loss: {running_val_loss:.4f}")
+		logger.info(f"mCEL: {running_val_loss:.4f}")
+		logger.info(f"mIoU: {total_iou:.4f}")
 
 	model.train()
 	freeze_encoder(model)
@@ -145,14 +151,14 @@ def get_dataloaders():
 	train_dataset = datasets.SBDataset(
 		root='./data/phase-1',
 		image_set='train_noval',
-		mode='boundaries',
+		mode='segmentation',
 		download=False,
 		transforms=TrainTransforms()
 	)
 	val_dataset = datasets.SBDataset(
 		root='./data/phase-1',
-		image_set='train',
-		mode='boundaries',
+		image_set='val',
+		mode='segmentation',
 		download=False,
 		transforms=EvalTransforms()
 	)
@@ -202,15 +208,16 @@ def main(device, model_path):
 	model = torch.compile(model)
 
 	model, optimizer, scheduler, scaler, start_epoch, train_loader, validation_loader = load_checkpoint(model_path, model)
+	criterion = nn.CrossEntropyLoss(ignore_index=255)
 
 	model.train()
 	freeze_encoder(model)
 
 	for epoch in range(start_epoch, NUM_EPOCHS):
-		train_batch(model, epoch, train_loader, optimizer, scheduler, scaler)
+		train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion)
 
 		if (epoch + 1) % VAL_INTERVAL == 0:
-			validate(model, validation_loader, device)
+			validate(model, validation_loader, device, criterion)
 
 		save_checkpoint(model, optimizer, scheduler, scaler, epoch, MODEL_PATH)
 
