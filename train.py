@@ -132,6 +132,7 @@ def load_checkpoint(model_path, model):
 	try:
 		ckpt = torch.load(model_path, map_location=device)
 		state_dict = ckpt["model_state"]
+		ckpt_epoch = ckpt.get("epoch", -1) + 1
 			
 		# Remove segmentation head params from checkpoint when number of classes differ.
 		keys_to_remove = []
@@ -159,59 +160,25 @@ def load_checkpoint(model_path, model):
 		
 		model.load_state_dict(state_dict, strict=False)
 
-		# If we removed head params (class mismatch) we should not load optimizer
-		# state since its internal tensors will still reference the old head shapes.
+		phase_3_start = NUM_EPOCHS_PHASE_1 + NUM_EPOCHS_PHASE_2
+		is_phase_3_resume = phase_3_start < ckpt_epoch < NUM_EPOCHS_PHASE_3
+		has_train_state = all(k in ckpt for k in ("optim_state", "scheduler_state", "scaler_state"))
+
 		if keys_to_remove:
-			logger.warning("Head class mismatch detected earlier — skipping optimizer state load to avoid tensor shape mismatches.")
+			logger.warning("Head class mismatch detected earlier — resetting optimizer/scheduler/scaler for clean phase transition.")
+			start_epoch = phase_3_start
+		elif is_phase_3_resume and has_train_state:
+			optimizer.load_state_dict(ckpt["optim_state"])
+			scheduler.load_state_dict(ckpt["scheduler_state"])
+			scaler.load_state_dict(ckpt["scaler_state"])
+			start_epoch = ckpt_epoch
+			logger.info("Resuming phase-3 optimizer/scheduler state.")
 		else:
-			# Sanitize and load optimizer state: ensure any saved optimizer tensors
-			# (e.g., exp_avg / exp_avg_sq) match current parameter shapes. If the
-			# saved param count doesn't match, skip loading optimizer state.
-			if "optim_state" in ckpt:
-				saved_optim = ckpt["optim_state"]
-
-				# Flatten saved param ids in order
-				saved_param_ids = []
-				for g in saved_optim.get("param_groups", []):
-					saved_param_ids.extend(g.get("params", []))
-
-				# Flatten current optimizer params in the same grouping order
-				current_params = []
-				for g in optimizer.param_groups:
-					for p in g.get("params", []):
-						current_params.append(p)
-
-				if len(saved_param_ids) == len(current_params):
-					for old_id, cur_p in zip(saved_param_ids, current_params):
-						state_entry = saved_optim.get("state", {}).get(old_id)
-						if not isinstance(state_entry, dict):
-							continue
-						for k, v in list(state_entry.items()):
-							if isinstance(v, torch.Tensor):
-
-								if k == 'step':
-									continue
-								# Only replace tensors that are parameter-shaped (same numel)
-								if v.numel() == cur_p.data.numel():
-									if v.shape != cur_p.data.shape:
-										logger.warning(
-											f"Optimizer state tensor '{k}' for saved param id {old_id} has shape {v.shape},"
-											f" expected {tuple(cur_p.data.shape)} — replacing with zeros.")
-										state_entry[k] = torch.zeros_like(cur_p.data)
-				else:
-					logger.warning("Saved optimizer param count does not match current model; skipping optimizer state load.")
-
-				try:
-					optimizer.load_state_dict(saved_optim)
-				except Exception as e:
-					logger.error(f"Failed to load optimizer state from checkpoint: {e}")
-					logger.warning("Continuing with freshly initialized optimizer.")
-			start_epoch = ckpt.get("epoch", -1) + 1
-			
-			if start_epoch != 20:
-				optimizer.load_state_dict(ckpt["optim_state"])
-				scheduler.load_state_dict(ckpt["scheduler_state"])
-				scaler.load_state_dict(ckpt["scaler_state"])
+			start_epoch = phase_3_start
+			if ckpt_epoch >= NUM_EPOCHS_PHASE_3:
+				logger.info("Phase-3 checkpoint already complete; starting from phase-3 boundary with fresh optimizer/scheduler.")
+			else:
+				logger.info("Using checkpoint model weights with fresh optimizer/scheduler/scaler.")
 	except FileNotFoundError:
 		logger.warning("Pretrain checkpoint not found. Starting from scratch.")
 	except (RuntimeError, KeyError) as err:
