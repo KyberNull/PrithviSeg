@@ -10,8 +10,6 @@ import logging
 from losses import dice_loss, compute_means
 from model import UNet
 import os
-from losses import dice_loss, compute_means
-from model import UNet
 import signal
 import sys
 import torch
