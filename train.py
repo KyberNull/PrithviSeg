@@ -7,7 +7,7 @@ pretraining so train.py can be reserved for downstream/domain training.
 
 from datasets import geospatial_dataset
 import logging
-from losses import dice_loss, compute_means
+from losses import dice_loss, iou
 from model import UNet
 import os
 import signal
@@ -117,7 +117,7 @@ def validate(model, validation_loader, device, criterion, epoch):
 
 			running_val_loss += val_loss.item()
 
-			_, iou = compute_means(val_prediction, val_output, NUM_CLASSES)
+			_, iou = iou(val_prediction, val_output, NUM_CLASSES)
 			total_iou += iou.item()
 
 		total_iou /= NUM_VAL_SAMPLES
