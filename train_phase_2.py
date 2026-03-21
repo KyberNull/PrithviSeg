@@ -6,7 +6,7 @@ pretraining so train.py can be reserved for downstream/domain training.
 """
 
 import logging
-from losses import dice_loss, iou
+from losses import dice_loss, iou_metric
 from model import UNet
 import os
 import signal
@@ -114,8 +114,8 @@ def validate(model, validation_loader, device, criterion):
 
 			running_val_loss += val_loss.item()
 
-			iou = iou(val_prediction, val_output, NUM_CLASSES)
-			total_iou += iou.item()
+			iou = iou_metric(val_prediction, val_output, NUM_CLASSES)
+			total_iou += float(iou)
 
 		total_iou /= NUM_VAL_SAMPLES
 		running_val_loss /= NUM_VAL_SAMPLES
