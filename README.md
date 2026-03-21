@@ -1,42 +1,55 @@
-
 > Develop an AI/ML model to identify key features from SVAMITVA Scheme drone orthophotos.
 
 # Scope
 - Extract building footprints and classify rooftops (RCC, Tiled, Tin, etc.).
 - Extract road networks and waterbodies.
 - Identify infrastructure locations such as distribution transformers, overhead tanks, wells.
-- Achieve a minimum 95% accuracy.
 - Optimize the model for efficient processing and deployment.
 
-## Input Data
-- Drone imagery for 10 villages (training & validation).
-- Drone imagery for 10 additional villages (output testing).
+## Project Structure
+- `train_phase_1.py`: Phase 1 pretraining on SBD segmentation (`NUM_CLASSES=21`).
+- `train_phase_2.py`: Phase 2 pretraining on LoveDA (`NUM_CLASSES=7`).
+- `train.py`: Phase 3 fine-tuning on the geospatial target dataset (`NUM_CLASSES=4`).
+- `evaluate.py`: Evaluation/visualization utility (VOC-style validation).
+- `model.pt`: Shared checkpoint file used across phases.
 
-## Expected Deliverables
-- A fully trained and optimized AI model for orthophoto feature extraction.
-- Feature-extracted datasets for training villages.
-- Technical documentation covering model design, training, and deployment.
-- Final report with accuracy metrics and improvement recommendations.
+## Environment Setup
+This repo uses `uv` and `pyproject.toml` (no `.env`-driven runtime configuration in current code).
 
-> Note: For VOC Segmentation, mask image has a special pixel value 255 that means “ignore this area.” `plt.imshow` treats that 255 as the top of the color scale. Real classes are only 0 to 20, so they got squeezed into very dark colors. That’s why you mostly saw the boundary/outline and not full regions.
+```bash
+uv sync
+source .venv/bin/activate
+```
 
-## Per-device configuration (`.env`)
+## Training Workflow
+Run phases in order:
 
-The project now supports device-specific configuration through a local `.env` file.
+```bash
+PYTHON_GIL=1 uv run train_phase_1.py
+PYTHON_GIL=1 uv run train_phase_2.py
+PYTHON_GIL=1 uv run train.py
+```
 
-1. Copy `.env.example` to `.env`.
-2. Set values that vary by machine (for example `TRAIN_BATCH_SIZE`, `EVAL_BATCH_SIZE`, and `NUM_WORKERS`).
-3. Run training/evaluation as usual; values are loaded automatically.
+Equivalent VS Code tasks are also available: `Pretrain`, `Train`, and `Evaluate`.
 
-Available keys:
+## Checkpoint and Resume Semantics
+- All phases read/write `model.pt`.
+- On class-count mismatch (for example 21->7 or 7->4), segmentation head weights are dropped and training state is reset for a clean phase transition.
+- Optimizer/scheduler/scaler states are resumed only for true in-phase continuation.
+- This prevents mixed optimizer/scheduler state and unintended LR carry-over across phases.
 
-- `MODEL_PATH`
-- `NUM_CLASSES`
-- `NUM_WORKERS`
-- `TRAIN_BATCH_SIZE`
-- `TRAIN_LEARNING_RATE`
-- `TRAIN_WEIGHT_DECAY`
-- `TRAIN_EPOCHS`
-- `EVAL_BATCH_SIZE`
-- `EVAL_MAX_EXAMPLES`
-- `IGNORE_LABEL`
+## Notes on Stability
+- Ignore label `255` is used where applicable (`CrossEntropyLoss(ignore_index=255)` in phase 2).
+- If loss becomes `NaN`, do not continue from that checkpoint; restart from the latest known-good checkpoint (or phase boundary) with fresh optimizer/scheduler state.
+- Monitor LR in logs; abrupt spikes usually indicate resume-state mismatch or schedule misalignment.
+
+## Evaluation
+
+```bash
+PYTHON_GIL=1 uv run evaluate.py
+```
+
+`evaluate.py` reports `mCEL` and `mIoU`, and can display qualitative predictions.
+
+## Data Note
+For VOC-style masks, label value `255` means ignore region. During plotting, mask ignored pixels if you want class colors to be visually consistent.

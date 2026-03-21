@@ -3,6 +3,10 @@ from rich.logging import RichHandler
 import torch
 from torch import nn
 
+# freeze_encoder disables encoder blocks
+# get_adamw_param_groups prepares parameter groups for AdamW with differential learning rates and weight decay
+
+logger = logging.getLogger(__name__)
 
 def freeze_encoder(model):
     """
@@ -11,10 +15,9 @@ def freeze_encoder(model):
     """
     
     encoder = getattr(model, "encoder", getattr(getattr(model, "_orig_mod", None), "encoder", None))
-    decoder = getattr(model, "decoder", getattr(getattr(model, "_orig_mod", None), "decoder", None))
 
     if encoder is None:
-        print("Warning: No 'encoder' attribute found in the model.")
+        logger.warning("Warning: No 'encoder' attribute found in the model.")
         return
 
     # 2. Freeze the entire encoder and set to eval mode (locks BatchNorm stats)
@@ -42,15 +45,6 @@ def freeze_encoder(model):
             block = getattr(encoder.features, str(idx), None)
             if block is not None:
                 block.train()
-
-    # 4. Ensure the decoder is completely unfrozen and in train mode
-    if decoder is not None:
-        for p in decoder.parameters():
-            p.requires_grad = True
-        decoder.train()
-        print("Model configured: Encoder partially frozen, Decoder fully trainable.")
-    else:
-        print("Warning: No 'decoder' attribute found, but encoder was configured.")
 
 def setup_logging():
     logging.basicConfig(
@@ -86,35 +80,54 @@ def save_checkpoint(model, optimizer, scheduler, scaler, epoch: int, path: str):
         "scaler_state": scaler.state_dict(),
     }, path)
 
-def get_adamw_param_groups(model: nn.Module, learning_rate: float, backbone_lr: float, weight_decay: float) -> list[dict]:
-    head_decay_params = []
-    head_no_decay_params = []
-    enc_decay_params = []
-    enc_no_decay_params = []
+def get_adamw_param_groups(model: nn.Module, decoder_lr: float, backbone_lr: float, weight_decay: float) -> list[dict]:
+    '''Prepares parameter groups for AdamW optimizer with differential learning rates and weight decay.'''
+    dec_decay_params = [] # For weights in the decoder that should have weight decay
+    dec_no_weight_decay_params = [] # For biases and normalization parameters in the decoder that should not have weight decay
+    enc_decay_params = [] # For weights in the encoder that should have weight decay (if unfrozen)
+    enc_no_weight_decay_params = [] # For biases and normalization parameters in the encoder that should not have weight decay (if unfrozen)
 
     for name, param in model.named_parameters():
-        if not param.requires_grad:                  #stops all but two blocks of encoder
+        # Stop all but two blocks of encoder
+        if not param.requires_grad:
             continue
-        is_encoder_param = name.startswith("encoder.")
-        if param.ndim <= 1 or name.endswith(".bias"): #catches are normalization weights and biases
+
+        # Handles both "encoder.*" and "_orig_mod.encoder.*"
+        is_encoder_param = name.startswith("encoder.") or name.startswith("_orig_mod.encoder.")
+
+        # Catches normalization weights and biases
+        if param.ndim <= 1 or name.endswith(".bias"):
             if is_encoder_param:
-                enc_no_decay_params.append(param)
+                enc_no_weight_decay_params.append(param)
             else:
-                head_no_decay_params.append(param)
-        else:                                          #catches all the weights 
+                dec_no_weight_decay_params.append(param)
+        # Catches all the remaining weights
+        else:                                          
             if is_encoder_param:                    
                 enc_decay_params.append(param)
             else:
-                head_decay_params.append(param)
+                dec_decay_params.append(param)
 
     param_groups = []
-    if head_decay_params:
-        param_groups.append({"params": head_decay_params, "weight_decay": weight_decay, "lr": learning_rate})
-    if head_no_decay_params:
-        param_groups.append({"params": head_no_decay_params, "weight_decay": 0.0, "lr": learning_rate})
+    if dec_decay_params:
+        param_groups.append({"params": dec_decay_params,
+                             "weight_decay": weight_decay,
+                             "lr": decoder_lr
+                             })
+    if dec_no_weight_decay_params:
+        param_groups.append({"params": dec_no_weight_decay_params,
+                             "weight_decay": 0.0,
+                             "lr": decoder_lr
+                            })
     if enc_decay_params:
-        param_groups.append({"params": enc_decay_params, "weight_decay": weight_decay, "lr": backbone_lr})
-    if enc_no_decay_params:
-        param_groups.append({"params": enc_no_decay_params, "weight_decay": 0.0, "lr": backbone_lr})
+        param_groups.append({"params": enc_decay_params,
+                             "weight_decay": weight_decay,
+                             "lr": backbone_lr
+                             })
+    if enc_no_weight_decay_params:
+        param_groups.append({"params": enc_no_weight_decay_params,
+                             "weight_decay": 0.0,
+                             "lr": backbone_lr
+                             })
 
     return param_groups

@@ -6,13 +6,13 @@ pretraining so train.py can be reserved for downstream/domain training.
 """
 
 import logging
-from losses import CBCE
+from losses import dice_loss, iou_metric
 from model import UNet
 import os
 import signal
 import sys
 import torch
-from torch import optim, autocast
+from torch import nn, optim, autocast
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -25,14 +25,13 @@ LEARNING_RATE = 0.001
 WEIGHT_DECAY = 0.001
 WARMUP_EPOCHS = 5
 MODEL_PATH = "model.pt"
-NUM_BATCHES = 4
-NUM_CLASSES = 20
+NUM_BATCHES = 16
+NUM_CLASSES = 21
 NUM_EPOCHS_PHASE_1 = 20
 NUM_EPOCHS = NUM_EPOCHS_PHASE_1
 NUM_WORKERS = min(4, os.cpu_count() or 1)
 VAL_INTERVAL = 1
 NUM_VAL_SAMPLES = 280
-CHECKPOINT_RAM_HEADROOM_GB = 0.1
 ###-----------------------###
 
 shutdown_requested = False
@@ -46,10 +45,10 @@ def handle_shutdown(sig, frame):
 	logger.warning(f"Shutdown requested! Signal: {sig}")
 	shutdown_requested = True
 
-def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler):
+def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion):
 	epoch_bar = tqdm(
 		train_loader,
-		desc=f"Phase 1 Epoch {epoch + 1}/{NUM_EPOCHS}",
+		desc=f"[Phase 1] Epoch {epoch + 1}/{NUM_EPOCHS}",
 		leave=True,
 		disable=not sys.stdout.isatty(),
 		position=0,
@@ -62,13 +61,19 @@ def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler):
 			return
 
 		input_tensor = input_tensor.to(device, non_blocking=True)
-		output_tensor = output_tensor.squeeze(1).to(device, non_blocking=True).float()
+		output_tensor = output_tensor.squeeze(1).to(device, non_blocking=True).long()
 
 		optimizer.zero_grad(set_to_none=True)
 
 		with autocast(device_type=device.type, dtype=amp_dtype):
 			prediction = model(input_tensor)
-			loss = CBCE(prediction, output_tensor, NUM_CLASSES)
+			loss = criterion(prediction, output_tensor)
+			loss += dice_loss(prediction, output_tensor, NUM_CLASSES)
+
+		if not torch.isfinite(loss):
+			logger.warning(f"Non-finite loss at epoch {epoch+1}, batch {batch}; skipping step.")
+			optimizer.zero_grad(set_to_none=True)
+			continue
 
 		scaler.scale(loss).backward()
 		scale_before_step = scaler.get_scale()
@@ -83,9 +88,10 @@ def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler):
 		avg_loss = running_loss / (batch + 1)
 		epoch_bar.set_postfix(loss=avg_loss, lr=scheduler.get_last_lr()[0])
 
-def validate(model, validation_loader, device):
+def validate(model, validation_loader, device, criterion):
 	model.eval()
 	running_val_loss = 0.0
+	total_iou = 0.0
 	val_iterator = iter(validation_loader)
 
 	with torch.no_grad():
@@ -97,17 +103,21 @@ def validate(model, validation_loader, device):
 				val_input, val_output = next(val_iterator)
 
 			val_input = val_input.to(device, non_blocking=True)
-			val_output = val_output.squeeze(1).to(device, non_blocking=True).float()
+			val_output = val_output.squeeze(1).to(device, non_blocking=True).long()
 
 			val_prediction = model(val_input)
 
-			val_loss = CBCE(val_prediction, val_output, NUM_CLASSES)
+			val_loss = criterion(val_prediction, val_output)
 
 			running_val_loss += val_loss.item()
+			iou = iou_metric(val_prediction, val_output, NUM_CLASSES)
+			total_iou += float(iou)
 
 		running_val_loss /= NUM_VAL_SAMPLES
+		total_iou /= NUM_VAL_SAMPLES
 
-		logger.info(f"mCBCE: {running_val_loss:.4f}")
+		logger.info(f"mCEL: {running_val_loss:.4f}")
+		logger.info(f"mIoU: {total_iou:.4f}")
 
 	model.train()
 	freeze_encoder(model)
@@ -115,7 +125,7 @@ def validate(model, validation_loader, device):
 def load_checkpoint(model_path, model):
 	start_epoch = 0
 	train_loader, validation_loader = get_dataloaders()
-	optimizer = optim.AdamW(get_adamw_param_groups(model, learning_rate=LEARNING_RATE, backbone_lr=0, weight_decay=WEIGHT_DECAY), lr=LEARNING_RATE)
+	optimizer = optim.AdamW(get_adamw_param_groups(model, decoder_lr=LEARNING_RATE, backbone_lr=0, weight_decay=WEIGHT_DECAY), lr=LEARNING_RATE)
 	scheduler = setup_scheduler(train_loader, optimizer)
 	scaler = torch.GradScaler(enabled=(device.type == "cuda")) # GradScaler is only useful on CUDA where float16 gradients can underflow.
 	try:
@@ -141,32 +151,29 @@ def get_dataloaders():
 	train_dataset = datasets.SBDataset(
 		root='./data/phase-1',
 		image_set='train_noval',
-		mode='boundaries',
-		download=True,
+		mode='segmentation',
+		download=False,
 		transforms=TrainTransforms()
 	)
 	val_dataset = datasets.SBDataset(
 		root='./data/phase-1',
-		image_set='train',
-		mode='boundaries',
-		download=True,
+		image_set='val',
+		mode='segmentation',
+		download=False,
 		transforms=EvalTransforms()
 	)
 	train_dataloader = DataLoader(
 		dataset=train_dataset,
-		batch_size=NUM_BATCHES,
-		shuffle=True,
+		shuffle=False,
 		num_workers=NUM_WORKERS,
 		pin_memory=pin_memory,
 		persistent_workers=NUM_WORKERS > 0
 		)
 	val_dataloader = DataLoader(
 		dataset=val_dataset,
-		batch_size=NUM_BATCHES,
 		shuffle=False,
-		num_workers=NUM_WORKERS,
 		pin_memory=pin_memory,
-		persistent_workers=NUM_WORKERS > 0
+		persistent_workers=False
 		)
 	return train_dataloader, val_dataloader
 
@@ -200,15 +207,16 @@ def main(device, model_path):
 	model = torch.compile(model)
 
 	model, optimizer, scheduler, scaler, start_epoch, train_loader, validation_loader = load_checkpoint(model_path, model)
+	criterion = nn.CrossEntropyLoss(ignore_index=255)
 
 	model.train()
 	freeze_encoder(model)
 
 	for epoch in range(start_epoch, NUM_EPOCHS):
-		train_batch(model, epoch, train_loader, optimizer, scheduler, scaler)
+		train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion)
 
 		if (epoch + 1) % VAL_INTERVAL == 0:
-			validate(model, validation_loader, device)
+			validate(model, validation_loader, device, criterion)
 
 		save_checkpoint(model, optimizer, scheduler, scaler, epoch, MODEL_PATH)
 

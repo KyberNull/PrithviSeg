@@ -1,6 +1,7 @@
 """Loss and metric helpers for segmentation training and evaluation."""
 
 import torch
+import torch.nn.functional as F
 
 def dice_loss(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth=1e-8):
     pred = torch.softmax(pred, dim=1)
@@ -28,14 +29,13 @@ def dice_loss(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth
     dice = (dice * class_present).sum(dim=1) / class_present.sum(dim=1).clamp_min(1)
     return 1 - dice.mean()
 
-def compute_means(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth = 1e-8):
+def iou_metric(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth = 1e-8):
     target = target.long()
     pred_labels = torch.argmax(pred, dim=1)
     # Ignore VOC's 255 label and compute class stats from a compact confusion matrix.
     valid_mask = (target != 255)
     if not valid_mask.any():
-        zero = pred.new_tensor(0.0)
-        return zero, zero
+        return pred.new_tensor(0.0)
 
     target_valid = target[valid_mask]
     pred_valid = pred_labels[valid_mask]
@@ -48,12 +48,11 @@ def compute_means(pred: torch.Tensor, target: torch.Tensor, num_classes: int, sm
     pred_sum = confusion.sum(dim=0)
     target_sum = confusion.sum(dim=1)
 
-    dice = (2 * true_positive + smooth) / (pred_sum + target_sum + smooth)
     union = pred_sum + target_sum - true_positive
-    iou = (true_positive + smooth) / (union + smooth)
+    iou_per_class = (true_positive + smooth) / (union + smooth)
 
     class_present = (pred_sum + target_sum) > 0
-    dice = (dice * class_present).sum(dim=1) / class_present.sum(dim=1).clamp_min(1)
-    iou = (iou * class_present).sum(dim=1) / class_present.sum(dim=1).clamp_min(1)
+    present_count = class_present.sum().clamp_min(1)
 
-    return dice.mean(), iou.mean()
+    iou = (iou_per_class * class_present).sum() / present_count
+    return iou

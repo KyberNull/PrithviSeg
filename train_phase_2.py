@@ -6,7 +6,7 @@ pretraining so train.py can be reserved for downstream/domain training.
 """
 
 import logging
-from losses import dice_loss, compute_means
+from losses import dice_loss, iou_metric
 from model import UNet
 import os
 import signal
@@ -22,20 +22,19 @@ from transforms import TrainTransforms, EvalTransforms
 from utils import get_adamw_param_groups, save_checkpoint, device_setup, setup_logging
 
 ###-------CONSTANTS-------###
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 3e-4
 BACKBONE_FACTOR = 20
 BACKBONE_LEARNING_RATE = LEARNING_RATE / BACKBONE_FACTOR
 WEIGHT_DECAY = 0.001
 WARMUP_EPOCHS = 5
 MODEL_PATH = "model.pt"
-NUM_BATCHES = 8
+NUM_BATCHES = 16
 NUM_CLASSES = 7
 NUM_EPOCHS_PHASE_2 = 50
 NUM_EPOCHS = NUM_EPOCHS_PHASE_2 + NUM_EPOCHS_PHASE_1
 NUM_WORKERS = min(4, os.cpu_count() or 1)
-VAL_INTERVAL = 1
+VAL_INTERVAL = 5
 NUM_VAL_SAMPLES = 150
-CHECKPOINT_RAM_HEADROOM_GB = 0.1
 ###-----------------------###
 
 shutdown_requested = False
@@ -52,7 +51,7 @@ def handle_shutdown(sig, frame):
 def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion):
 	epoch_bar = tqdm(
 		train_loader,
-		desc=f"Phase 2 Epoch {epoch + 1}/{NUM_EPOCHS}",
+		desc=f"[Phase 2] Epoch {epoch + 1}/{NUM_EPOCHS}",
 		leave=True,
 		disable=not sys.stdout.isatty(),
 		position=0,
@@ -73,6 +72,11 @@ def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criter
 			prediction = model(input_tensor)
 			loss = criterion(prediction, output_tensor)
 			loss += dice_loss(prediction, output_tensor, NUM_CLASSES)
+
+		if not torch.isfinite(loss):
+			logger.warning(f"Non-finite loss at epoch {epoch+1}, batch {batch}; skipping step.")
+			optimizer.zero_grad(set_to_none=True)
+			continue
 
 		scaler.scale(loss).backward()
 		scale_before_step = scaler.get_scale()
@@ -110,8 +114,8 @@ def validate(model, validation_loader, device, criterion):
 
 			running_val_loss += val_loss.item()
 
-			_, iou = compute_means(val_prediction, val_output, NUM_CLASSES)
-			total_iou += iou.item()
+			iou = iou_metric(val_prediction, val_output, NUM_CLASSES)
+			total_iou += float(iou)
 
 		total_iou /= NUM_VAL_SAMPLES
 		running_val_loss /= NUM_VAL_SAMPLES
@@ -120,7 +124,6 @@ def validate(model, validation_loader, device, criterion):
 		logger.info(f"mIoU: {total_iou:.4f}")
 
 	model.train()
-
 
 def load_checkpoint(model_path, model):
 	start_epoch = NUM_EPOCHS_PHASE_1
@@ -131,6 +134,7 @@ def load_checkpoint(model_path, model):
 	try:
 		ckpt = torch.load(model_path, map_location=device)
 		state_dict = ckpt["model_state"]
+		ckpt_epoch = ckpt.get("epoch", -1) + 1
 			
 		# Remove segmentation head params from checkpoint when number of classes differ.
 		keys_to_remove = []
@@ -158,59 +162,25 @@ def load_checkpoint(model_path, model):
 		
 		model.load_state_dict(state_dict, strict=False)
 
-		# If we removed head params (class mismatch) we should not load optimizer
-		# state since its internal tensors will still reference the old head shapes.
+		# Resume optimizer/scheduler only for true phase-2 continuation.
+		is_phase_2_resume = NUM_EPOCHS_PHASE_1 < ckpt_epoch < NUM_EPOCHS
+		has_train_state = all(k in ckpt for k in ("optim_state", "scheduler_state", "scaler_state"))
+
 		if keys_to_remove:
-			logger.warning("Head class mismatch detected earlier — skipping optimizer state load to avoid tensor shape mismatches.")
+			logger.warning("Head class mismatch detected earlier — resetting optimizer/scheduler/scaler for clean phase transition.")
+			start_epoch = NUM_EPOCHS_PHASE_1
+		elif is_phase_2_resume and has_train_state:
+			optimizer.load_state_dict(ckpt["optim_state"])
+			scheduler.load_state_dict(ckpt["scheduler_state"])
+			scaler.load_state_dict(ckpt["scaler_state"])
+			start_epoch = ckpt_epoch
+			logger.info("Resuming phase-2 optimizer/scheduler state.")
 		else:
-			# Sanitize and load optimizer state: ensure any saved optimizer tensors
-			# (e.g., exp_avg / exp_avg_sq) match current parameter shapes. If the
-			# saved param count doesn't match, skip loading optimizer state.
-			if "optim_state" in ckpt:
-				saved_optim = ckpt["optim_state"]
-
-				# Flatten saved param ids in order
-				saved_param_ids = []
-				for g in saved_optim.get("param_groups", []):
-					saved_param_ids.extend(g.get("params", []))
-
-				# Flatten current optimizer params in the same grouping order
-				current_params = []
-				for g in optimizer.param_groups:
-					for p in g.get("params", []):
-						current_params.append(p)
-
-				if len(saved_param_ids) == len(current_params):
-					for old_id, cur_p in zip(saved_param_ids, current_params):
-						state_entry = saved_optim.get("state", {}).get(old_id)
-						if not isinstance(state_entry, dict):
-							continue
-						for k, v in list(state_entry.items()):
-							if isinstance(v, torch.Tensor):
-
-								if k == 'step':
-									continue
-								# Only replace tensors that are parameter-shaped (same numel)
-								if v.numel() == cur_p.data.numel():
-									if v.shape != cur_p.data.shape:
-										logger.warning(
-											f"Optimizer state tensor '{k}' for saved param id {old_id} has shape {v.shape},"
-											f" expected {tuple(cur_p.data.shape)} — replacing with zeros.")
-										state_entry[k] = torch.zeros_like(cur_p.data)
-				else:
-					logger.warning("Saved optimizer param count does not match current model; skipping optimizer state load.")
-
-				try:
-					optimizer.load_state_dict(saved_optim)
-				except Exception as e:
-					logger.error(f"Failed to load optimizer state from checkpoint: {e}")
-					logger.warning("Continuing with freshly initialized optimizer.")
-			start_epoch = ckpt.get("epoch", -1) + 1
-			
-			if start_epoch <= NUM_EPOCHS_PHASE_1:
-				optimizer.load_state_dict(ckpt["optim_state"])
-				scheduler.load_state_dict(ckpt["scheduler_state"])
-				scaler.load_state_dict(ckpt["scaler_state"])
+			start_epoch = NUM_EPOCHS_PHASE_1
+			if ckpt_epoch >= NUM_EPOCHS:
+				logger.info("Phase-2 checkpoint already complete; starting from phase-2 boundary with fresh optimizer/scheduler.")
+			else:
+				logger.info("Using checkpoint model weights with fresh optimizer/scheduler/scaler.")
 	except FileNotFoundError:
 		logger.warning("Pretrain checkpoint not found. Starting from scratch.")
 	except (RuntimeError, KeyError) as err:
@@ -227,14 +197,14 @@ def get_dataloaders():
 		split = 'train',
 		scene=['rural', 'urban'],
 		transforms=TrainTransforms(), #type: ignore
-		download=True,
+		download=False,
 		)
 	val_dataset = LoveDA(
 		root='./data/phase-2',
 		split = 'val',
 		scene=['rural', 'urban'],
 		transforms=EvalTransforms(), #type: ignore
-		download=True,
+		download=False,
 		)
 	train_dataloader = DataLoader(
 		dataset=train_dataset,
@@ -246,9 +216,7 @@ def get_dataloaders():
 		)
 	val_dataloader = DataLoader(
 		dataset=val_dataset,
-		batch_size=NUM_BATCHES,
 		shuffle=False,
-		num_workers=NUM_WORKERS,
 		pin_memory=pin_memory,
 		)
 	return train_dataloader, val_dataloader
@@ -283,7 +251,6 @@ def main(device, model_path):
 	criterion = nn.CrossEntropyLoss(ignore_index=255)
 
 	model.train()
-
 	for epoch in range(start_epoch, NUM_EPOCHS):
 		train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion)
 

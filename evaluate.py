@@ -1,5 +1,6 @@
 """Evaluation and qualitative visualization utilities for model predictions."""
 
+from datasets import geospatial_dataset
 import logging
 import os
 from losses import compute_means
@@ -10,14 +11,13 @@ from rich.logging import RichHandler
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
-from torchvision import datasets
 from tqdm import tqdm
 from transforms import EvalTransforms, IMAGENET_MEAN, IMAGENET_STD
 
 MODEL_PATH = "model.pt"
 NUM_WORKERS = min(4, os.cpu_count() or 1)
 NUM_BATCHES = 16
-NUM_CLASSES = 21
+NUM_CLASSES = 4
 MAX_EXAMPLES = 10
 IGNORE_LABEL = 255
 
@@ -27,8 +27,11 @@ logger = logging.getLogger(__name__)
 
 def test_model():
         
-    testData = datasets.VOCSegmentation('./data', year = '2012', image_set = 'val', transforms = EvalTransforms())
-    testLoader = DataLoader(dataset=testData, shuffle=True, num_workers=NUM_WORKERS, pin_memory=pin_memory, batch_size=NUM_BATCHES, persistent_workers=NUM_WORKERS > 0)
+    test_img_dir = "data/phase-3/TestingDataset/processed_datasets"
+    test_mask_dir = "data/phase-3/TestingDataset/processed_masks"
+
+    test_dataset = geospatial_dataset(img_dir=test_img_dir, img_mask=test_mask_dir, transform=EvalTransforms())
+    test_dataloader = DataLoader(dataset=test_dataset, batch_size=NUM_BATCHES, shuffle=True, pin_memory=pin_memory)
 
     criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL)
 
@@ -51,14 +54,14 @@ def test_model():
     total_CEL = 0
     total_iou = 0
 
-    testing_bar = tqdm(testLoader, desc = "Evaluating Model", leave=True)
+    testing_bar = tqdm(test_dataloader, desc = "Evaluating Model", leave=True)
 
     with torch.no_grad():
         for (test_input, target) in testing_bar:
             test_input = test_input.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
             # Convert masks from [N, 1, H, W] to [N, H, W] class ids.
-            target = target.squeeze(1)
+            target = target.squeeze(1).long()
             preds = model(test_input)
 
             if (len(results_to_view) < MAX_EXAMPLES):
