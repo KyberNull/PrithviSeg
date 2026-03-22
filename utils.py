@@ -26,6 +26,7 @@ def device_setup():
         amp_dtype = torch.float16
         torch.backends.cudnn.benchmark = True
         torch.backends.cuda.matmul.fp32_precision = 'tf32'
+        torch.set_float32_matmul_precision('high')
         torch.backends.cudnn.allow_tf32 = True
 
     elif torch.mps.is_available():

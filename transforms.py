@@ -14,7 +14,7 @@ class EvalTransforms:
     '''Transforms for evaluation, including resizing and type conversions. 
         Does only resize and type conversions for consistent evaluation.
     '''
-    def __init__(self, size=(768, 768)):
+    def __init__(self, size=(512, 512)):
         self.size = size
 
     def __call__(self, image, mask=None):
@@ -44,7 +44,7 @@ class TrainTransforms:
     '''Data augmentation transforms for training,
     including random resized cropPIng, horizontal flipping, and rotation.
     '''
-    def __init__(self, size=(768, 768), scale=(0.5, 1.0), ratio=(1, 1), rotation_degrees=5):
+    def __init__(self, size=(512, 512), scale=(0.5, 1.0), ratio=(1, 1), rotation_degrees=5):
         self.size = size
         self.scale = scale
         self.ratio = ratio
@@ -61,6 +61,7 @@ class TrainTransforms:
             v2.RandomRotation((180, 180)),
             v2.RandomRotation((270, 270)),
         ])
+      
     def __call__(self, image, mask=None) -> tuple[torch.Tensor, torch.Tensor]:
         if mask is None:
             if isinstance(image, dict):

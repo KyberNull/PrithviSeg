@@ -3,9 +3,9 @@
 from datasets import geospatial_dataset
 import logging
 import os
-from losses import compute_means
+from losses import iou_metric
 import matplotlib.pyplot as plt
-from model import UNet
+from model import SegFormer
 import numpy
 from rich.logging import RichHandler
 import torch
@@ -27,15 +27,15 @@ logger = logging.getLogger(__name__)
 
 def test_model():
         
-    test_img_dir = "data/phase-3/TestingDataset/processed_datasets"
-    test_mask_dir = "data/phase-3/TestingDataset/processed_masks"
+    test_img_dir = "data/TestingDataset/processed_datasets"
+    test_mask_dir = "data/TestingDataset/processed_masks"
 
     test_dataset = geospatial_dataset(img_dir=test_img_dir, img_mask=test_mask_dir, transform=EvalTransforms())
     test_dataloader = DataLoader(dataset=test_dataset, batch_size=NUM_BATCHES, shuffle=True, pin_memory=pin_memory)
 
     criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL)
 
-    model = UNet(NUM_CLASSES).to(device=device, non_blocking=True)
+    model = SegFormer(NUM_CLASSES).to(device=device, non_blocking=True)
     model = torch.compile(model=model)
 
 
@@ -74,7 +74,7 @@ def test_model():
                                         "pred_mask": pred_mask, 
                                         "true_mask": true_mask})
             val_loss = criterion(preds, target)
-            _, iou = compute_means(preds, target, NUM_CLASSES)
+            iou = iou_metric(preds, target, NUM_CLASSES)
             total_CEL += val_loss.item()
             total_iou += iou.item()
             count += 1

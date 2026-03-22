@@ -29,7 +29,7 @@ BACKBONE_LEARNING_RATE = LEARNING_RATE / BACKBONE_FACTOR
 WEIGHT_DECAY = 0.01
 WARMUP_EPOCHS = 10
 MODEL_PATH = "model.pt"
-BATCH_SIZE = 4
+BATCH_SIZE = 8
 NUM_CLASSES = 4
 NUM_EPOCHS_PHASE_3 = 100
 NUM_WORKERS = 2
@@ -43,19 +43,15 @@ amp_dtype = torch.bfloat16
 logger = logging.getLogger(__name__)
 
 def handle_shutdown(sig, frame):
+	"""Handles the shutdown and saving of the model"""
 	del frame
 	global shutdown_requested
 	logger.warning(f"Shutdown requested! Signal: {sig}")
 	shutdown_requested = True
 
 def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion):
-	epoch_bar = tqdm(
-		train_loader,
-		desc=f"[Train] Epoch {epoch + 1}/{NUM_EPOCHS_PHASE_3}",
-		leave=True,
-		disable=not sys.stdout.isatty(),
-		position=0,
-	)
+	"""Trains one batch of images"""
+	epoch_bar = tqdm(train_loader, desc=f"[Train] Epoch {epoch + 1}/{NUM_EPOCHS_PHASE_3}", leave=True, disable=not sys.stdout.isatty(), position=0 )
 	running_loss = 0.0
 
 	for batch, (input_tensor, output_tensor) in enumerate(epoch_bar):
@@ -187,10 +183,10 @@ def load_checkpoint(path, model, optimizer=None, scheduler=None, scaler=None):
 
 def get_dataloaders():
 	#Importing the trainning and validation villages
-	train_img_dir = "data/phase-3/TrainningDataset/processed_datasets"
-	train_mask_dir = "data/phase-3/TrainningDataset/processed_masks"
-	val_img_dir = "data/phase-3/ValidationDataset/processed_datasets"
-	val_mask_dir = "data/phase-3/ValidationDataset/processed_masks"
+	train_img_dir = "data/TrainningDataset/processed_datasets"
+	train_mask_dir = "data/TrainningDataset/processed_masks"
+	val_img_dir = "data/ValidationDataset/processed_datasets"
+	val_mask_dir = "data/ValidationDataset/processed_masks"
 
 	train_dataset = geospatial_dataset(
 		img_dir=train_img_dir,
