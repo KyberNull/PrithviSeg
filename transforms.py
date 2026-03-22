@@ -44,7 +44,7 @@ class TrainTransforms:
     '''Data augmentation transforms for training,
     including random resized cropPIng, horizontal flipping, and rotation.
     '''
-    def __init__(self, size=(512, 512), scale=(0.5, 1.0), ratio=(1, 1), rotation_degrees=5):
+    def __init__(self, size=(512, 512), scale=(0.5, 1.0), ratio=(1, 1), rotation_degrees=30):
         self.size = size
         self.scale = scale
         self.ratio = ratio
@@ -54,7 +54,7 @@ class TrainTransforms:
             v2.RandomVerticalFlip(),
         ])
         self.random_resized_crop = v2.RandomResizedCrop(size=self.size, scale=self.scale, ratio=self.ratio)
-        self.colorjitter = v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05,)
+        #self.colorjitter = v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05,)
         self.rotate90 = v2.RandomChoice([
             v2.RandomRotation((0, 0)),
             v2.RandomRotation((90, 90)),
@@ -76,7 +76,7 @@ class TrainTransforms:
         image, mask = self.random_resized_crop(image, mask)
         image, mask = self.flips(image, mask)
         image, mask = self.rotate90(image, mask)
-        image = self.colorjitter(image)
+        #image = self.colorjitter(image)
         #Converting the image to float32 and mask to int64 as only one channel in mask
         image = F.to_image(image)
         image = F.to_dtype(image, torch.float32, scale=True)
