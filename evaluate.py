@@ -16,7 +16,7 @@ from transforms import EvalTransforms, IMAGENET_MEAN, IMAGENET_STD
 
 MODEL_PATH = "model.pt"
 NUM_WORKERS = min(4, os.cpu_count() or 1)
-NUM_BATCHES = 16
+NUM_BATCHES = 8
 NUM_CLASSES = 4
 MAX_EXAMPLES = 10
 IGNORE_LABEL = 255
@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 def test_model():
         
-    test_img_dir = "data/TestingDataset/processed_datasets"
-    test_mask_dir = "data/TestingDataset/processed_masks"
+    test_img_dir = "data/phase-3/TestingDataset/processed_datasets"
+    test_mask_dir = "data/phase-3/TestingDataset/processed_masks"
 
     test_dataset = geospatial_dataset(img_dir=test_img_dir, img_mask=test_mask_dir, transform=EvalTransforms())
     test_dataloader = DataLoader(dataset=test_dataset, batch_size=NUM_BATCHES, shuffle=True, pin_memory=pin_memory)

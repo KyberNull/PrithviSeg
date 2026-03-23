@@ -25,7 +25,7 @@ LEARNING_RATE = 5e-5
 WEIGHT_DECAY = 0.01
 WARMUP_EPOCHS = 10
 MODEL_PATH = "model.pt"
-BATCH_SIZE = 8
+BATCH_SIZE = 4
 NUM_CLASSES = 8
 NUM_EPOCHS_PRETRAIN = 50
 NUM_EPOCHS = NUM_EPOCHS_PRETRAIN
@@ -249,8 +249,8 @@ def main(device, model_path):
 	
 	train_loader, validation_loader = get_dataloaders()
 
-	model, optimizer, scheduler, scaler, start_epoch, train_loader = load_checkpoint(model_path, model, train_loader)
 	model = torch.compile(model)
+	model, optimizer, scheduler, scaler, start_epoch, train_loader = load_checkpoint(model_path, model, train_loader)
 	criterion = nn.CrossEntropyLoss(ignore_index=0)
 
 	model.train()
