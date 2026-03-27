@@ -7,32 +7,29 @@ pretraining so train.py can be reserved for downstream/domain training.
 
 from datasets import geospatial_dataset
 import logging
-from losses import dice_loss, iou_metric
-from model import UNet
-import os
+from losses import dice_loss, iou_metric, iou_metric_processed_fast, focal_loss
+from model import SegFormer
 import signal
 import sys
 import torch
-from torch import nn, optim, autocast
+from torch import optim, autocast
+from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from train_phase_1 import NUM_EPOCHS_PHASE_1
-from train_phase_2 import NUM_EPOCHS_PHASE_2
-from transforms import TrainTransforms, EvalTransforms
-from utils import get_adamw_param_groups, save_checkpoint, device_setup, setup_logging, freeze_encoder
+from pretrain import NUM_EPOCHS_PRETRAIN
+from transforms import TrainTransforms, EvalTransforms, PostProcessing
+from utils import get_adamw_param_groups, save_checkpoint, device_setup, setup_logging
 
 ###-------CONSTANTS-------###
-LEARNING_RATE = 1e-4
-BACKBONE_FACTOR = 10
-BACKBONE_LEARNING_RATE = LEARNING_RATE / BACKBONE_FACTOR
-WEIGHT_DECAY = 0.001
-WARMUP_EPOCHS = 5
+LEARNING_RATE = 7e-5
+WEIGHT_DECAY = 0.01
+WARMUP_EPOCHS = 10
 MODEL_PATH = "model.pt"
-NUM_BATCHES = 16
+BATCH_SIZE = 8
 NUM_CLASSES = 4
 NUM_EPOCHS_PHASE_3 = 100
-NUM_WORKERS = min(4, os.cpu_count() or 1)
+NUM_WORKERS = 2
 VAL_INTERVAL = 1
 NUM_VAL_SAMPLES = 280
 ###-----------------------###
@@ -43,19 +40,15 @@ amp_dtype = torch.bfloat16
 logger = logging.getLogger(__name__)
 
 def handle_shutdown(sig, frame):
+	"""Handles the shutdown and saving of the model"""
 	del frame
 	global shutdown_requested
 	logger.warning(f"Shutdown requested! Signal: {sig}")
 	shutdown_requested = True
 
 def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion):
-	epoch_bar = tqdm(
-		train_loader,
-		desc=f"[Train] Epoch {epoch + 1}/{NUM_EPOCHS_PHASE_3}",
-		leave=True,
-		disable=not sys.stdout.isatty(),
-		position=0,
-	)
+	"""Trains one batch of images"""
+	epoch_bar = tqdm(train_loader, desc=f"[Train] Epoch {epoch + 1}/{NUM_EPOCHS_PHASE_3}", leave=True, disable=not sys.stdout.isatty(), position=0 )
 	running_loss = 0.0
 
 	for batch, (input_tensor, output_tensor) in enumerate(epoch_bar):
@@ -69,7 +62,10 @@ def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criter
 		optimizer.zero_grad(set_to_none=True)
 
 		with autocast(device_type=device.type, dtype=amp_dtype):
-			prediction = model(input_tensor)
+			backends = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
+			with sdpa_kernel(backends=backends, set_priority=True):
+				prediction = model(input_tensor)
+			
 			loss = criterion(prediction, output_tensor)
 			loss += dice_loss(prediction, output_tensor, NUM_CLASSES)
 
@@ -95,6 +91,7 @@ def validate(model, validation_loader, device, criterion, epoch):
 	model.eval()
 	running_val_loss = 0.0
 	total_iou = 0.0
+	total_iou_processed = 0.0
 	val_iterator = iter(validation_loader)
 
 	with torch.no_grad():
@@ -111,6 +108,7 @@ def validate(model, validation_loader, device, criterion, epoch):
 			with autocast(device_type=device.type, dtype=amp_dtype):
 				val_prediction = model(val_input)
 				val_loss = criterion(val_prediction, val_output)
+				processed_mask = PostProcessing(NUM_CLASSES)(val_prediction)
 
 			if not torch.isfinite(val_loss):
 				continue
@@ -118,82 +116,79 @@ def validate(model, validation_loader, device, criterion, epoch):
 			running_val_loss += val_loss.item()
 
 			iou = iou_metric(val_prediction, val_output, NUM_CLASSES)
+			iou_processed = iou_metric_processed_fast(processed_mask, val_output, NUM_CLASSES)
 			total_iou += float(iou)
+			total_iou_processed += float(iou_processed)
 
 		total_iou /= NUM_VAL_SAMPLES
+		total_iou_processed /= NUM_VAL_SAMPLES
 		running_val_loss /= NUM_VAL_SAMPLES
 
 		logger.info(f"mCEL: {running_val_loss:.4f}")
 		logger.info(f"mIoU: {total_iou:.4f}")
+		logger.info(f"mIoU (Processed): {total_iou_processed:.4f}")
+
 
 	model.train()
-	#freeze_encoder(model)
 
-def load_checkpoint(model_path, model):
-	start_epoch = NUM_EPOCHS_PHASE_1 + NUM_EPOCHS_PHASE_2
-	train_loader, validation_loader = get_dataloaders()
-	optimizer = optim.AdamW(get_adamw_param_groups(model, LEARNING_RATE, BACKBONE_LEARNING_RATE, WEIGHT_DECAY), lr=LEARNING_RATE)
-	scheduler = setup_scheduler(train_loader, optimizer)
-	scaler = torch.GradScaler(enabled=(device.type == "cuda")) # GradScaler is only useful on CUDA where float16 gradients can underflow.
+def load_checkpoint(path, model, optimizer=None, scheduler=None, scaler=None):
+	start_epoch = NUM_EPOCHS_PRETRAIN  # Default to starting at phase 3 
+	new_segmentation_head = False
+
 	try:
-		ckpt = torch.load(model_path, map_location=device)
+		ckpt = torch.load(path, map_location="cpu")
 		state_dict = ckpt["model_state"]
-		ckpt_epoch = ckpt.get("epoch", -1) + 1
-			
-		# Remove segmentation head params from checkpoint when number of classes differ.
-		keys_to_remove = []
-		for k, v in list(state_dict.items()):
-			if k.endswith('head.weight'):
-				if v.shape[0] != NUM_CLASSES:
-					keys_to_remove.append(k)
-					# Replacing 'weight' with 'bias' to remove the corresponding biases.
-					bias_k = k[:-len('weight')] + 'bias'
-					if bias_k in state_dict:
-						keys_to_remove.append(bias_k)
 
-		if keys_to_remove:
-			# report original classes if possible
-			try:
-				# Finding the first item in the list which matches the needs.
-				sample_key = next(key for key in keys_to_remove if key.endswith('head.weight'))
-				orig_classes = state_dict[sample_key].shape[0]
-			except StopIteration:
-				orig_classes = 'unknown'
+		# ---- Handle segmentation head mismatch (safe version) ----
+		for k in list(state_dict.keys()):
+			if "segmentation_head.0.weight" in k:
+				# Check the shape in the checkpoint vs current model
+				# model.state_dict() will have the '_orig_mod' prefix if compiled
+				model_state = model.state_dict()
+				
+				if k in model_state:
+					old_num_classes = state_dict[k].shape[0]
+					new_num_classes = model_state[k].shape[0]
 
-			logger.warning(f"Pre-trained head has {orig_classes} classes, but current task has {NUM_CLASSES}. Excluding head parameters: {keys_to_remove}")
-			for k in keys_to_remove:
-				state_dict.pop(k, None)
-		
-		model.load_state_dict(state_dict, strict=False)
+					if old_num_classes != new_num_classes:
+						logger.warning(f"Shape mismatch at {k}: {old_num_classes} -> {new_num_classes}. Dropping head.")
+						new_segmentation_head = True
+						del state_dict[k]
+						# Also remove the bias
+						bias_key = k.replace("weight", "bias")
+						if bias_key in state_dict:
+							del state_dict[bias_key]
+				break
 
-		phase_3_start = NUM_EPOCHS_PHASE_1 + NUM_EPOCHS_PHASE_2
-		is_phase_3_resume = phase_3_start < ckpt_epoch < NUM_EPOCHS_PHASE_3
-		has_train_state = all(k in ckpt for k in ("optim_state", "scheduler_state", "scaler_state"))
+		# ---- Load model weights ----
+		missing, unexpected = model.load_state_dict(state_dict, strict=False)
+		if missing:
+			logger.warning(f"Missing keys: {missing}")
+		if unexpected:
+			logger.warning(f"Unexpected keys: {unexpected}")
 
-		if keys_to_remove:
-			logger.warning("Head class mismatch detected earlier — resetting optimizer/scheduler/scaler for clean phase transition.")
-			start_epoch = phase_3_start
-		elif is_phase_3_resume and has_train_state:
+		# ---- Resume training state if available ----
+		has_train_state = all(
+			k in ckpt for k in ("optim_state", "scheduler_state", "scaler_state")
+		)
+
+		if has_train_state and not new_segmentation_head and optimizer and scheduler and scaler:
 			optimizer.load_state_dict(ckpt["optim_state"])
 			scheduler.load_state_dict(ckpt["scheduler_state"])
 			scaler.load_state_dict(ckpt["scaler_state"])
-			start_epoch = ckpt_epoch
-			logger.info("Resuming phase-3 optimizer/scheduler state.")
+			start_epoch = ckpt.get("epoch", 0) + 1
+			logger.info(f"Resuming training from epoch {start_epoch}")
 		else:
-			start_epoch = phase_3_start
-			if ckpt_epoch >= NUM_EPOCHS_PHASE_3:
-				logger.info("Phase-3 checkpoint already complete; starting from phase-3 boundary with fresh optimizer/scheduler.")
-			else:
-				logger.info("Using checkpoint model weights with fresh optimizer/scheduler/scaler.")
+			logger.info("Loaded model weights only (fresh optimizer/scheduler).")
+
 	except FileNotFoundError:
-		logger.warning("Pretrain checkpoint not found. Starting from scratch.")
+		logger.warning("Checkpoint not found. Starting from scratch.")
+
 	except (RuntimeError, KeyError) as err:
-		logger.error(f"Checkpoint incompatible with current model architecture: {err}")
+		logger.error(f"Incompatible checkpoint: {err}")
 		logger.warning("Starting from scratch.")
 
-	logger.info(f"Resuming pretraining from epoch {start_epoch+1}")
-
-	return model, optimizer, scheduler, scaler, start_epoch, train_loader, validation_loader
+	return start_epoch
 
 def get_dataloaders():
 	#Importing the trainning and validation villages
@@ -206,27 +201,27 @@ def get_dataloaders():
 		img_dir=train_img_dir,
 		img_mask=train_mask_dir,
 		transform=TrainTransforms()
-		)
+	)
 	val_dataset = geospatial_dataset(
 		img_dir=val_img_dir,
 		img_mask=val_mask_dir,
 		transform=EvalTransforms()
-		)
+	)
 	train_dataloader = DataLoader(
 		dataset=train_dataset,
-		batch_size=NUM_BATCHES,
+		batch_size=BATCH_SIZE,
 		shuffle=True,
 		num_workers=NUM_WORKERS,
 		pin_memory=pin_memory,
-		persistent_workers=NUM_WORKERS > 0
-		)
+		persistent_workers=NUM_WORKERS > 0,
+		prefetch_factor=1,
+	)
 	val_dataloader = DataLoader(
 		dataset=val_dataset,
-		batch_size=NUM_BATCHES,
 		shuffle=False,
 		num_workers=NUM_WORKERS,
 		pin_memory=pin_memory
-		)
+	)
 	return train_dataloader, val_dataloader
 
 def setup_scheduler(train_loader, optimizer):
@@ -235,12 +230,12 @@ def setup_scheduler(train_loader, optimizer):
 		max(0, NUM_EPOCHS_PHASE_3 * len(train_loader) - 1),
 	)
 
-	scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS_PHASE_3 * len(train_loader) - warmup_steps, eta_min=LEARNING_RATE * 0.1)
+	scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS_PHASE_3 * len(train_loader) - warmup_steps - NUM_EPOCHS_PRETRAIN, eta_min=LEARNING_RATE * 0.1)
 
 	if warmup_steps > 0:
 		warmup_scheduler = LinearLR(
 			optimizer,
-			start_factor=0.1,
+			start_factor=0.01,
 			end_factor=1.0,
 			total_iters=warmup_steps,
 		)
@@ -252,15 +247,21 @@ def setup_scheduler(train_loader, optimizer):
 	return scheduler
 
 def main(device, model_path):
-	model = UNet(num_classes=NUM_CLASSES).to(device=device, non_blocking=True)
+	model = SegFormer(num_classes=NUM_CLASSES).to(device=device, non_blocking=True)
 
 	#freeze_encoder(model)
 
 	model = torch.compile(model)
 
-	model, optimizer, scheduler, scaler, start_epoch, train_loader, validation_loader = load_checkpoint(model_path, model)
+	train_loader, validation_loader = get_dataloaders()
 
-	criterion = nn.CrossEntropyLoss()
+	optimizer = optim.AdamW(get_adamw_param_groups(model, WEIGHT_DECAY), lr=LEARNING_RATE)
+	scheduler = setup_scheduler(train_loader, optimizer)
+	scaler = torch.GradScaler(enabled=(device.type == "cuda")) # GradScaler is only useful on CUDA where float16 gradients can underflow.
+
+	start_epoch = load_checkpoint(model_path, model, optimizer, scheduler, scaler)
+
+	criterion = focal_loss
 
 	model.train()
 	#freeze_encoder(model)

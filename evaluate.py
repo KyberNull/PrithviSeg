@@ -3,16 +3,16 @@
 from datasets import geospatial_dataset
 import logging
 import os
-from losses import compute_means
+from losses import iou_metric, iou_metric_processed_fast
 import matplotlib.pyplot as plt
-from model import UNet
+from model import SegFormer
 import numpy
 from rich.logging import RichHandler
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from transforms import EvalTransforms, IMAGENET_MEAN, IMAGENET_STD
+from transforms import EvalTransforms, PostProcessing, IMAGENET_MEAN, IMAGENET_STD
 
 MODEL_PATH = "model.pt"
 NUM_WORKERS = min(4, os.cpu_count() or 1)
@@ -35,7 +35,7 @@ def test_model():
 
     criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_LABEL)
 
-    model = UNet(NUM_CLASSES).to(device=device, non_blocking=True)
+    model = SegFormer(NUM_CLASSES).to(device=device, non_blocking=True)
     model = torch.compile(model=model)
 
 
@@ -53,6 +53,7 @@ def test_model():
     count = 0
     total_CEL = 0
     total_iou = 0
+    total_iou_processed = 0
 
     testing_bar = tqdm(test_dataloader, desc = "Evaluating Model", leave=True)
 
@@ -69,21 +70,29 @@ def test_model():
                 test_input_img = test_input[0].cpu().numpy().transpose(1,2,0)
                 pred_mask = torch.argmax(preds[0], dim = 0).cpu().numpy()
                 true_mask = target[0].cpu().numpy()
+                processed_mask = PostProcessing(NUM_CLASSES)(preds[0:1])[0].cpu().numpy()
 
                 results_to_view.append({"image":test_input_img, 
                                         "pred_mask": pred_mask, 
-                                        "true_mask": true_mask})
+                                        "true_mask": true_mask,
+                                        "processed_mask": processed_mask})
             val_loss = criterion(preds, target)
-            _, iou = compute_means(preds, target, NUM_CLASSES)
+
+            pred_mask_batch = PostProcessing(NUM_CLASSES)(preds)
+            iou = iou_metric(preds, target, NUM_CLASSES)
+            iou_processed = iou_metric_processed_fast(pred_mask_batch, target, NUM_CLASSES)
             total_CEL += val_loss.item()
             total_iou += iou.item()
+            total_iou_processed += iou_processed.item()
             count += 1
 
     total_CEL /= count
     total_iou /= count
+    total_iou_processed /= count
 
     logger.info(f"mCEL: {total_CEL:.4f}")
     logger.info(f"mIoU: {total_iou:.4f}")
+    logger.info(f"mIoU (Processed): {total_iou_processed:.4f}")
 
 
 def view_results():
@@ -93,21 +102,27 @@ def view_results():
         image = data["image"]
         image = (image * numpy.array(IMAGENET_STD)) + numpy.array(IMAGENET_MEAN)
 
-        plt.subplot(1,3,1)
+        plt.subplot(1,4,1)
         plt.imshow(numpy.clip(image, 0, 1))
         plt.title(f"Example {i+1}: Input")
         plt.axis('off')
 
-        plt.subplot(1,3,2)
+        plt.subplot(1,4,2)
         true_mask = numpy.ma.masked_equal(data["true_mask"], IGNORE_LABEL)
         plt.imshow(true_mask, cmap="tab20", vmin=0, vmax=NUM_CLASSES - 1, interpolation="nearest")
         plt.title("Ground Truth")
         plt.axis("off")
 
-        plt.subplot(1,3,3)
+        plt.subplot(1,4,3)
         plt.imshow(data["pred_mask"], cmap="tab20", vmin=0, vmax=NUM_CLASSES - 1, interpolation="nearest")
         plt.title("Predicted Mask")
         plt.axis("off")
+
+        plt.subplot(1,4,4)
+        plt.imshow(data["processed_mask"], cmap="tab20", vmin=0, vmax=NUM_CLASSES - 1, interpolation="nearest")
+        plt.title("Processed Predicted Mask")
+        plt.axis("off")
+
 
         plt.tight_layout()
         plt.show()
