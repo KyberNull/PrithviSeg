@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from model import SegFormer
 import numpy
 import signal
+import sys
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
@@ -67,6 +68,8 @@ def test_model():
 
     with torch.no_grad():
         for (test_input, target) in testing_bar:
+            if shutdown_requested:
+                sys.exit(0)
             test_input = test_input.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
             # Convert masks from [N, 1, H, W] to [N, H, W] class ids.
