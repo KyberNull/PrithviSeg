@@ -2,16 +2,18 @@
 
 from datasets import geospatial_dataset
 import logging
-import os
 from losses import iou_metric, iou_metric_processed_fast, pixel_accuracy_metric
 import matplotlib.pyplot as plt
 from model import SegFormer
+import os
 import numpy
-from rich.logging import RichHandler
+import signal
+import sys
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transforms import EvalTransforms, PostProcessing, IMAGENET_MEAN, IMAGENET_STD
+from utils import device_setup, setup_logging, handle_shutdown, shutdown_requested
 
 MODEL_PATH = "model.pt"
 NUM_WORKERS = min(4, os.cpu_count() or 1)
@@ -20,18 +22,18 @@ NUM_CLASSES = 4
 MAX_EXAMPLES = 5
 IGNORE_LABEL = 255
 
+INPUT_DIR = "data/input_demo"
+MASK_DIR = "data/masks_demo"
+
 pin_memory = False
 results_to_view = []
 logger = logging.getLogger(__name__)
 
 
 def test_model():
-    test_img_dir = "data/TestingDataset/processed_datasets"
-    test_mask_dir = "data/TestingDataset/processed_masks"
-
     test_dataset = geospatial_dataset(
-        img_dir=test_img_dir,
-        img_mask=test_mask_dir,
+        img_dir=INPUT_DIR,
+        img_mask=MASK_DIR,
         transform=EvalTransforms(),
     )
     test_dataloader = DataLoader(
@@ -68,6 +70,8 @@ def test_model():
 
     with torch.no_grad():
         for test_input, target in testing_bar:
+            if shutdown_requested:
+                sys.exit(0)
             test_input = test_input.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
             target = target.squeeze(1).long()
@@ -173,19 +177,9 @@ def main():
 
 
 if __name__ == "__main__":
-    device = torch.device("cpu")
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
 
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        pin_memory = True
-        torch.backends.cudnn.benchmark = True
-    elif torch.mps.is_available():
-        device = torch.device("mps")
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(message)s",
-        handlers=[RichHandler()],
-        force=True,
-    )
+    device, pin_memory, amp_dtype = device_setup()
+    setup_logging()
     main()
