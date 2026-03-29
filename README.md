@@ -7,27 +7,129 @@
 - Optimize the model for efficient processing and deployment.
 
 ## Project Structure
-- `train_phase_1.py`: Phase 1 pretraining on SBD segmentation (`NUM_CLASSES=21`).
-- `train_phase_2.py`: Phase 2 pretraining on LoveDA (`NUM_CLASSES=7`).
-- `train.py`: Phase 3 fine-tuning on the geospatial target dataset (`NUM_CLASSES=4`).
-- `evaluate.py`: Evaluation/visualization utility (VOC-style validation).
-- `model.pt`: Shared checkpoint file used across phases.
+ # 🛰️ MOPR Geospatial Hackathon: Semantic Segmentation from Drone Imagery
+
+ <p align="center">
+	 <img src="https://img.shields.io/badge/python-3.14+-blue.svg" alt="Python Version">
+	 <img src="https://img.shields.io/badge/Model-SegFormer-orange.svg" alt="Model">
+ </p>
+
+ ---
+
+ ## 🚀 Overview
+
+ This project develops a deep learning pipeline for **semantic segmentation** of drone orthophotos, focusing on extracting building footprints, classifying rooftops, mapping road networks, and identifying key infrastructure for the [SVAMITVA Scheme](https://svamitva.nic.in/). The solution is optimized for efficient processing and deployment on large-scale geospatial datasets.
+
+ ---
+
+ ## ✨ Key Features
+
+ - **Multi-phase Training:** Pretraining on LoveDA, fine-tuning on geospatial targets
+ - **SegFormer Backbone:** Modern transformer-based semantic segmentation
+ - **Flexible Dataset Support:** Easily extendable for new geospatial datasets
+ - **Robust Evaluation:** VOC-style validation and qualitative visualization
+ - **Efficient Checkpointing:** Smart resume and phase transition logic
+
+ ---
+
+ ## 🗂️ Project Structure
+
+ ```text
+ ├── train.py           # Phase 3: Fine-tuning on geospatial dataset
+ ├── pretrain.py        # Phase 2: Pretraining on LoveDA
+ ├── evaluate.py        # Evaluation and visualization
+ ├── model.py           # SegFormer model definition
+ ├── datasets.py        # Dataset loading utilities
+ ├── losses.py          # Loss functions and metrics
+ ├── transforms.py      # Data augmentation and transforms
+ ├── utils.py           # Utility functions
+ ├── model.pt           # Shared model checkpoint
+ ├── data/              # Data directory (see below)
+ └── ...
+ ```
+
+ **Data Directory Layout:**
+ ```text
+ data/
+	 phase-1/   # SBD dataset
+	 phase-2/   # LoveDA dataset
+	 phase-3/   # Target geospatial dataset
+ ```
+
+ ---
+
+ ## ⚙️ Installation & Environment Setup
+
+ This project uses [uv](https://github.com/astral-sh/uv) for fast Python dependency management.
+
+ ```bash
+ uv sync
+ source .venv/bin/activate
+ ```
+
+ ---
+
+ ## 🏋️ Training & Evaluation Workflow
+
+ Run each phase in order for best results:
+
+ ```bash
+ # Phase 1: Pretrain on LoveDA
+ uv run pretrain.py
+
+ # Phase 2: Fine-tune on geospatial dataset
+ uv run train.py
+
+ # Evaluate
+ uv run evaluate.py
+ ```
+
+ Or use the provided VS Code tasks: **Pretrain**, **Train**, **Evaluate**.
+
+ ---
+
+ ## 🧠 Model Details
+
+ - **Architecture:** [SegFormer](https://arxiv.org/abs/2105.15203) (MiT-b2 backbone, via `segmentation_models_pytorch`)
+ - **Losses:** Dice, Focal, IoU
+ - **Metrics:** mIoU, per-class IoU, pixel accuracy
+ - **Checkpoints:** All phases read/write `model.pt` (auto-handles class-count transitions)
+
+ ---
+
+ ## 📊 Results & Visualizations
+
+ Example outputs and validation metrics will be shown here after training. (Add images or tables as you progress!)
+
+ ---
+
+ ## 🤝 Contributing
+
+ Contributions are welcome! Please open issues or pull requests for improvements, bugfixes, or new features.
+
+ ---
+
+ ## 🙏 Acknowledgements
+
+ - [SVAMITVA Scheme](https://svamitva.nic.in/)
+ - [SegFormer Paper](https://arxiv.org/abs/2105.15203)
+ - [LoveDA Dataset](https://github.com/Junjue-Wang/LoveDA)
+ - [SBD Dataset](https://www2.eecs.berkeley.edu/Research/Projects/CS/vision/grouping/semantic_contours/benchmark.tgz)
+ - [segmentation_models.pytorch](https://github.com/qubvel/segmentation_models.pytorch)
 
 ## Environment Setup
 This repo uses `uv` and `pyproject.toml` (no `.env`-driven runtime configuration in current code).
 
 ```bash
 uv sync
-source .venv/bin/activate
 ```
 
 ## Training Workflow
 Run phases in order:
 
 ```bash
-PYTHON_GIL=1 uv run train_phase_1.py
-PYTHON_GIL=1 uv run train_phase_2.py
-PYTHON_GIL=1 uv run train.py
+uv run pretrain.py
+uv run train.py
 ```
 
 Equivalent VS Code tasks are also available: `Pretrain`, `Train`, and `Evaluate`.
@@ -46,7 +148,7 @@ Equivalent VS Code tasks are also available: `Pretrain`, `Train`, and `Evaluate`
 ## Evaluation
 
 ```bash
-PYTHON_GIL=1 uv run evaluate.py
+uv run evaluate.py
 ```
 
 `evaluate.py` reports `mCEL` and `mIoU`, and can display qualitative predictions.
