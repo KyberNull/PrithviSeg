@@ -1,11 +1,10 @@
 """Custom geospatial_dataset class"""
 
+import os
+from PIL import Image
+import torch
 from torch.utils.data import Dataset
 from torchvision import tv_tensors
-import numpy as np
-import torch
-from PIL import Image
-import os
 
 class geospatial_dataset(Dataset):
     """Custom dataset class to load the geospatial dataset"""

@@ -18,10 +18,10 @@ from torch.utils.data import DataLoader
 from torchgeo.datasets import LoveDA
 from tqdm import tqdm
 from transforms import TrainTransforms, EvalTransforms
-from utils import get_adamw_param_groups, save_checkpoint, device_setup, setup_logging
+from utils import get_adamw_param_groups, save_checkpoint, device_setup, setup_logging, handle_shutdown, shutdown_requested
 
 ###-------CONSTANTS-------###
-LEARNING_RATE = 7e-5
+LEARNING_RATE = 6e-5
 WEIGHT_DECAY = 0.01
 WARMUP_EPOCHS = 10
 MODEL_PATH = "model.pt"
@@ -34,16 +34,9 @@ VAL_INTERVAL = 1
 NUM_VAL_SAMPLES = 150
 ###-----------------------###
 
-shutdown_requested = False
 pin_memory = False
 amp_dtype = torch.bfloat16
 logger = logging.getLogger(__name__)
-
-def handle_shutdown(sig, frame):
-	del frame
-	global shutdown_requested
-	logger.warning(f"Shutdown requested! Signal: {sig}")
-	shutdown_requested = True
 
 def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion):
 	epoch_bar = tqdm(
