@@ -62,6 +62,26 @@ def iou_metric(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smoot
     iou = (iou_per_class * class_present).sum() / present_count
     return iou
 
+def pixel_accuracy_metric(pred: torch.Tensor, target: torch.Tensor, ignore_index: int = 255, eps: float = 1e-8):
+    """Compute mean pixel accuracy while ignoring ignore_index pixels."""
+
+    if pred.ndim == 4:
+        pred_labels = torch.argmax(pred, dim=1)
+    else:
+        pred_labels = pred.long()
+
+    target = target.long()
+    valid_mask = target != ignore_index
+
+    if not valid_mask.any():
+        return pred_labels.new_tensor(0.0, dtype=torch.float32)
+
+    correct = (pred_labels == target) & valid_mask
+    correct_pixels = correct.sum().float()
+    valid_pixels = valid_mask.sum().float()
+
+    return correct_pixels / (valid_pixels + eps)
+
 def iou_metric_processed_fast(pred, target, num_classes, eps=1e-6):
     """
     pred: (B, H, W) - processed predictions

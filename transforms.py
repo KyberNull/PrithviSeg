@@ -130,7 +130,7 @@ class PostProcessing:
             cls_mask = (base_mask == cls).astype(np.uint8)
 
             # 2. Extract BOTH external boundaries (islands) and internal holes using CCOMP hierarchy
-            contours, hierarchy = cv2.findContours(cls_mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+            contours, hierarchy = cv2.findContours(cls_mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_TC89_L1)
             
             if hierarchy is not None:
                 hierarchy = hierarchy[0]
@@ -147,6 +147,7 @@ class PostProcessing:
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
             cls_mask = cv2.morphologyEx(cls_mask, cv2.MORPH_OPEN, kernel)
             cls_mask = cv2.morphologyEx(cls_mask, cv2.MORPH_CLOSE, kernel)
+
 
             cls_mask = processors[cls](torch.from_numpy(cls_mask)).numpy().astype(np.uint8)
 
@@ -170,7 +171,7 @@ class PostProcessing:
         return straight_mask
 
 class PostProcessingRoads:
-    def __init__(self, min_road_area=400, gap_threshold=15, road_width=5):
+    def __init__(self, min_road_area=400, gap_threshold=15, road_width=50):
         """
         Args:
             min_road_area: Removes any isolated road segment smaller than this (pixels).
