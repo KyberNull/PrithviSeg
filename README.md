@@ -51,7 +51,6 @@
  **Data Directory Layout:**
  ```text
  data/
-	 phase-1/   # SBD dataset
 	 phase-2/   # LoveDA dataset
 	 phase-3/   # Target geospatial dataset
  ```
@@ -114,7 +113,6 @@
  - [SVAMITVA Scheme](https://svamitva.nic.in/)
  - [SegFormer Paper](https://arxiv.org/abs/2105.15203)
  - [LoveDA Dataset](https://github.com/Junjue-Wang/LoveDA)
- - [SBD Dataset](https://www2.eecs.berkeley.edu/Research/Projects/CS/vision/grouping/semantic_contours/benchmark.tgz)
  - [segmentation_models.pytorch](https://github.com/qubvel/segmentation_models.pytorch)
 
 ## Environment Setup
