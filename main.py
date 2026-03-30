@@ -1,23 +1,23 @@
-import os
-import re
-import torch
-import logging
-import rasterio
-import numpy as np
+"""This script implements a complete pipeline for processing large geospatial .tiff images using a SegFormer"""
+
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import geopandas as gpd
-import shutil
-from tqdm import tqdm
+import logging
+from model import SegFormer
+import numpy as np
+import os
 from PIL import Image as PILImage
+import re
+import rasterio
 from rasterio.windows import Window
 from rasterio import features
+import torch
+from torchvision import tv_tensors
+from tqdm import tqdm
+from transforms import EvalTransforms, PostProcessing
+import shutil
 from shapely.geometry import shape
 from shapely.validation import make_valid
-from torchvision import tv_tensors
-from concurrent.futures import ProcessPoolExecutor, as_completed
-
-# --- Import your specific Model/Transforms ---
-from model import SegFormer
-from transforms import EvalTransforms, PostProcessing
 
 logging.basicConfig(level=logging.INFO)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -25,7 +25,7 @@ PILImage.MAX_IMAGE_PIXELS = None
 
 #Configuration
 PATCH_SIZE = 1024
-STRIDE = PATCH_SIZE 
+STRIDE = PATCH_SIZE
 NUM_CLASSES = 4 
 MODEL_PATH = "model.pt"
 USE_TORCH_COMPILE = True
@@ -195,7 +195,5 @@ def main():
     except:
         print("An unexpeted error occured while deleting the folders.")
 
-
 if __name__ == "__main__":
     main()
-    print("Pipeline is successfully completed.") #TODO:Added for debugging purposes remove later. 
