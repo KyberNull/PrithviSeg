@@ -18,9 +18,14 @@ from transforms import EvalTransforms, PostProcessing
 import shutil
 from shapely.geometry import shape
 from shapely.validation import make_valid
+import signal
+import sys
+from utils import device_setup, setup_logging, handle_shutdown, shutdown_requested
 
-logging.basicConfig(level=logging.INFO)
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+pin_memory = False
+amp_dtype = torch.bfloat16
+logger = logging.getLogger(__name__)
+
 PILImage.MAX_IMAGE_PIXELS = None
 
 #Configuration
@@ -196,4 +201,12 @@ def main():
         print("An unexpeted error occured while deleting the folders.")
 
 if __name__ == "__main__":
+
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+
+    device, pin_memory, amp_dtype = device_setup()
+
+    setup_logging()
+
     main()
