@@ -16,7 +16,8 @@ from torchvision import tv_tensors
 from tqdm import tqdm
 from transforms import EvalTransforms, PostProcessing
 import shutil
-from shapely.geometry import shape
+from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, shape
+from shapely.ops import unary_union
 from shapely.validation import make_valid
 import signal
 import sys
@@ -181,7 +182,25 @@ def main():
         if all_geoms:
             # Re-open original to get CRS
             with rasterio.open(input_file) as src:
-                gdf = gpd.GeoDataFrame({'geometry': all_geoms}, crs=src.crs)
+                # Dissolve touching polygons so tile boundaries are removed.
+                merged = unary_union(all_geoms)
+                if merged.is_empty:
+                    continue
+
+                if isinstance(merged, Polygon):
+                    merged_geoms = [merged]
+                elif isinstance(merged, MultiPolygon):
+                    merged_geoms = list(merged.geoms)
+                elif isinstance(merged, GeometryCollection):
+                    merged_geoms = [g for g in merged.geoms if isinstance(g, (Polygon, MultiPolygon))]
+                else:
+                    merged_geoms = []
+
+                if not merged_geoms:
+                    logging.info(f"No polygon geometry remained after merge for class {class_val}")
+                    continue
+
+                gdf = gpd.GeoDataFrame({'geometry': merged_geoms}, crs=src.crs)
 
                 #Renaming the aquired .shps so the names batch the classes inside them.
                 if class_val == 1:
@@ -195,12 +214,14 @@ def main():
                 logging.info(f"Saved: {output_shp}")
 
 
-    #Deleting the processed_masks and processed_dataset folder since the pipeline is done and does not need it further. 
-    try:
-        shutil.rmtree("processed_masks")
-        shutil.rmtree("processed_dataset")
-    except:
-        print("An unexpeted error occured while deleting the folders.")
+    # Delete temporary inference folders created during this run.
+    for folder in [MASK_DIR, DATASET_DIR]:
+        if os.path.isdir(folder):
+            try:
+                shutil.rmtree(folder)
+                logging.info(f"Deleted temporary folder: {folder}")
+            except Exception as exc:
+                logging.warning(f"Could not delete folder '{folder}': {exc}")
 
 if __name__ == "__main__":
 
