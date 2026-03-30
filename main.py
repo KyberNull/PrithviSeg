@@ -5,7 +5,6 @@ import logging
 import rasterio
 import numpy as np
 import geopandas as gpd
-import shutil
 from tqdm import tqdm
 from PIL import Image as PILImage
 from rasterio.windows import Window
@@ -23,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 PILImage.MAX_IMAGE_PIXELS = None
 
-#Configuration
+# --- Configuration ---
 PATCH_SIZE = 1024
 STRIDE = PATCH_SIZE 
 NUM_CLASSES = 4 
@@ -104,20 +103,19 @@ def main():
             for c in cols:
                 win = Window.from_slices((r, r + PATCH_SIZE), (c, c + PATCH_SIZE))
                 
-                #Exytract the .tiff patch
+                # --- A. Read and Save Input Patch ---
                 patch = src.read(window=win, boundless=True, out_shape=(src.count, PATCH_SIZE, PATCH_SIZE))
                 rgb_patch = patch[:3].transpose(1, 2, 0).astype(np.uint8) # HWC for PIL
                 
                 patch_id = f"R{r}_C{c}"
                 PILImage.fromarray(rgb_patch).save(os.path.join(DATASET_DIR, f"{patch_id}.png"))
-
-
-                #Making a dummy mask to be passed into EvalTransform as it needs both an image and a mask
+                
+                # --- B. Transform & Predict ---
+                # Keep original integer dtype so EvalTransforms can scale correctly.
                 img_t = tv_tensors.Image(torch.from_numpy(patch[:3]))
                 dummy_m = tv_tensors.Mask(torch.zeros((1, PATCH_SIZE, PATCH_SIZE)))
                 img_t, _ = transform(img_t, dummy_m)
                 
-                #Getting the prediction mask and resizing it up
                 with torch.no_grad():
                     preds = model(img_t.unsqueeze(0).to(device))
                     mask_512 = post_processor(preds)[0]
@@ -126,19 +124,20 @@ def main():
                         size=(PATCH_SIZE, PATCH_SIZE), mode="nearest"
                     ).squeeze().cpu().numpy().astype(np.uint8)
 
-                #Cropping edges so it does not rasterize outside the boundaries
+                # Crop edge patches so we do not vectorize predictions outside raster bounds.
                 valid_h = min(PATCH_SIZE, H - r)
                 valid_w = min(PATCH_SIZE, W - c)
                 mask_patch = mask_1024[:valid_h, :valid_w]
 
-                # Saved the predicted mask
+                # --- C. Save Predicted Mask ---
                 mask_file = f"{patch_id}_mask.png"
                 PILImage.fromarray(mask_patch).save(os.path.join(MASK_DIR, mask_file))
                 current_mask_files.append(mask_file)
                 pbar.update(1)
         pbar.close()
 
-    #Iterates throughs all the masks and then merges them into an .shp vector file
+    # 3. Vectorization (Iterate through the saved masks in MASK_DIR)
+    # To keep GPS accuracy, we re-calculate the transform based on the filename
     for class_val in [1, 2, 3]:
         logging.info(f"Vectorizing Class {class_val} from folder...")
         all_geoms = []
@@ -175,27 +174,9 @@ def main():
             # Re-open original to get CRS
             with rasterio.open(input_file) as src:
                 gdf = gpd.GeoDataFrame({'geometry': all_geoms}, crs=src.crs)
-
-                #Renaming the aquired .shps so the names batch the classes inside them.
-                if class_val == 1:
-                    output_shp = "Road.shp"
-                elif class_val == 2:
-                    output_shp = "BuildUpArea.shp"
-                else:
-                    output_shp = "WaterBodies.shp"
-
+                output_shp = f"output_class_{class_val}.shp"
                 gdf.to_file(output_shp)
                 logging.info(f"Saved: {output_shp}")
 
-
-    #Deleting the processed_masks and processed_dataset folder since the pipeline is done and does not need it further. 
-    try:
-        shutil.rmtree("processed_masks")
-        shutil.rmtree("processed_dataset")
-    except:
-        print("An unexpeted error occured while deleting the folders.")
-
-
 if __name__ == "__main__":
     main()
-    print("Pipeline is successfully completed.") #TODO:Added for debugging purposes remove later. 
