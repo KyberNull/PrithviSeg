@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from pretrain import NUM_EPOCHS_PRETRAIN
 from transforms import TrainTransforms, EvalTransforms, PostProcessing
-from utils import get_adamw_param_groups, save_checkpoint, device_setup, setup_logging
+from utils import get_adamw_param_groups, save_checkpoint, device_setup, setup_logging, handle_shutdown, shutdown_requested
 
 ###-------CONSTANTS-------###
 LEARNING_RATE = 7e-5
@@ -28,23 +28,15 @@ WARMUP_EPOCHS = 10
 MODEL_PATH = "model.pt"
 BATCH_SIZE = 8
 NUM_CLASSES = 4
-NUM_EPOCHS_PHASE_3 = 100
+NUM_EPOCHS_PHASE_3 = 130
 NUM_WORKERS = 2
 VAL_INTERVAL = 1
 NUM_VAL_SAMPLES = 280
 ###-----------------------###
 
-shutdown_requested = False
 pin_memory = False
 amp_dtype = torch.bfloat16
 logger = logging.getLogger(__name__)
-
-def handle_shutdown(sig, frame):
-	"""Handles the shutdown and saving of the model"""
-	del frame
-	global shutdown_requested
-	logger.warning(f"Shutdown requested! Signal: {sig}")
-	shutdown_requested = True
 
 def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion):
 	"""Trains one batch of images"""
@@ -247,11 +239,9 @@ def setup_scheduler(train_loader, optimizer):
 	return scheduler
 
 def main(device, model_path):
-	model = SegFormer(num_classes=NUM_CLASSES).to(device=device, non_blocking=True)
-
-	#freeze_encoder(model)
-
+	model = SegFormer(num_classes=NUM_CLASSES)
 	model = torch.compile(model)
+	model = model.to(device=device, non_blocking=True)
 
 	train_loader, validation_loader = get_dataloaders()
 
@@ -264,7 +254,6 @@ def main(device, model_path):
 	criterion = focal_loss
 
 	model.train()
-	#freeze_encoder(model)
 
 	for epoch in range(start_epoch, NUM_EPOCHS_PHASE_3):
 		train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion)

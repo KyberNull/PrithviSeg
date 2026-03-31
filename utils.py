@@ -2,10 +2,16 @@ import logging
 from rich.logging import RichHandler
 import torch
 
-# freeze_encoder disables encoder blocks
 # get_adamw_param_groups prepares parameter groups for AdamW with differential learning rates and weight decay
 
 logger = logging.getLogger(__name__)
+shutdown_requested = False
+
+def handle_shutdown(sig, frame):
+	del frame
+	global shutdown_requested
+	logger.warning(f"Shutdown requested! Signal: {sig}")
+	shutdown_requested = True
 
 def setup_logging():
     logging.basicConfig(
