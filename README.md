@@ -6,7 +6,6 @@
 - Identify infrastructure locations such as distribution transformers, overhead tanks, wells.
 - Optimize the model for efficient processing and deployment.
 
-## Project Structure
  # 🛰️ MOPR Geospatial Hackathon: Semantic Segmentation from Drone Imagery
 
  <p align="center">
@@ -14,13 +13,10 @@
 	 <img src="https://img.shields.io/badge/Model-SegFormer-orange.svg" alt="Model">
  </p>
 
- ---
-
  ## 🚀 Overview
 
  This project develops a deep learning pipeline for **semantic segmentation** of drone orthophotos, focusing on extracting building footprints, classifying rooftops, mapping road networks, and identifying key infrastructure for the [SVAMITVA Scheme](https://svamitva.nic.in/). The solution is optimized for efficient processing and deployment on large-scale geospatial datasets.
 
- ---
 
  ## ✨ Key Features
 
@@ -30,7 +26,6 @@
  - **Robust Evaluation:** VOC-style validation and qualitative visualization
  - **Efficient Checkpointing:** Smart resume and phase transition logic
 
- ---
 
  ## 🗂️ Project Structure
 
@@ -55,7 +50,6 @@
 	 phase-3/   # Target geospatial dataset
  ```
 
- ---
 
  ## ⚙️ Installation & Environment Setup
 
@@ -66,7 +60,6 @@
  source .venv/bin/activate
  ```
 
- ---
 
  ## 🏋️ Training & Evaluation Workflow
 
@@ -85,7 +78,6 @@
 
  Or use the provided VS Code tasks: **Pretrain**, **Train**, **Evaluate**.
 
- ---
 
  ## 🧠 Model Details
 
@@ -94,19 +86,10 @@
  - **Metrics:** mIoU, per-class IoU, pixel accuracy
  - **Checkpoints:** All phases read/write `model.pt` (auto-handles class-count transitions)
 
- ---
 
  ## 📊 Results & Visualizations
 
- Example outputs and validation metrics will be shown here after training. (Add images or tables as you progress!)
-
- ---
-
- ## 🤝 Contributing
-
- Contributions are welcome! Please open issues or pull requests for improvements, bugfixes, or new features.
-
- ---
+ \[WIP\] Example outputs and validation metrics will be shown here after training.
 
  ## 🙏 Acknowledgements
 
