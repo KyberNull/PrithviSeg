@@ -23,11 +23,11 @@ from utils import get_adamw_param_groups, save_checkpoint, device_setup, setup_l
 ###-------CONSTANTS-------###
 LEARNING_RATE = 6e-5
 WEIGHT_DECAY = 0.01
-WARMUP_EPOCHS = 10
+WARMUP_EPOCHS = 5
 MODEL_PATH = "model.pt"
 BATCH_SIZE = 8
 NUM_CLASSES = 8
-NUM_EPOCHS_PRETRAIN = 50
+NUM_EPOCHS_PRETRAIN = 20
 NUM_EPOCHS = NUM_EPOCHS_PRETRAIN
 NUM_WORKERS = 2
 VAL_INTERVAL = 1
