@@ -32,7 +32,7 @@ def apply_clahe(image):
     img = img.astype(np.float32) / 255.0
     return torch.from_numpy(img).permute(2, 0, 1)
 
-def shadow_correction_tensor(image):
+def shadow_correction(image):
     # image: torch [C,H,W] float [0,1]
     img = (image.permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
 
@@ -77,7 +77,7 @@ def _apply_preprocessing(image, mode="original"):
         return apply_clahe(image)
 
     elif mode == "shadow":
-        return shadow_correction_tensor(image)
+        return shadow_correction(image)
 
     else:
         return image
@@ -103,7 +103,12 @@ class EvalTransforms:
         mask = F.resize(mask, self.size, interpolation=InterpolationMode.NEAREST)
 
         image = F.to_image(image)
-        image = shadow_correction_tensor(image)
+        luma = 0.299 * image[0] + 0.587 * image[1] + 0.114 * image[2]
+        contrast_score = torch.std(luma).item()
+
+        if contrast_score < 0.08:
+            image = apply_clahe(image)
+        
         image = F.normalize(image, mean=IMAGENET_MEAN, std=IMAGENET_STD)
 
         mask = mask.to(torch.int64)
