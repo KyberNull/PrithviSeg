@@ -1,6 +1,6 @@
 """Phase 3 (downstream training) specific configuration."""
 
-from .phase2 import NUM_EPOCHS_PRETRAIN
+from .pretrain import NUM_EPOCHS_PRETRAIN
 
 NUM_CLASSES_PHASE_3 = 4
 NUM_EPOCHS_PHASE_3 = NUM_EPOCHS_PRETRAIN + 50
