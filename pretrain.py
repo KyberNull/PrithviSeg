@@ -6,6 +6,7 @@ pretraining so train.py can be reserved for downstream/domain training.
 """
 
 import logging
+import math
 from losses import dice_loss, iou_metric, focal_loss
 from model import SegFormer
 import signal
@@ -32,13 +33,15 @@ NUM_EPOCHS = NUM_EPOCHS_PRETRAIN
 NUM_WORKERS = 2
 VAL_INTERVAL = 1
 NUM_VAL_SAMPLES = 150
+GRAD_ACCUM_STEPS = 1
+USE_GRADIENT_CHECKPOINTING = False
 ###-----------------------###
 
 pin_memory = False
 amp_dtype = torch.bfloat16
 logger = logging.getLogger(__name__)
 
-def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion):
+def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion, grad_accum_steps):
 	epoch_bar = tqdm(
 		train_loader,
 		desc=f"[Pretrain] Epoch {epoch + 1}/{NUM_EPOCHS}",
@@ -47,6 +50,7 @@ def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criter
 		position=0,
 	)
 	running_loss = 0.0
+	optimizer.zero_grad(set_to_none=True)
 
 	for batch, (input_tensor, output_tensor) in enumerate(epoch_bar):
 		if shutdown_requested:
@@ -55,8 +59,6 @@ def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criter
 
 		input_tensor = input_tensor.to(device, non_blocking=True)
 		output_tensor = output_tensor.squeeze(1).to(device, non_blocking=True).long()
-
-		optimizer.zero_grad(set_to_none=True)
 
 		with autocast(device_type=device.type, dtype=amp_dtype):
 			backends = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
@@ -70,14 +72,18 @@ def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criter
 			optimizer.zero_grad(set_to_none=True)
 			continue
 
-		scaler.scale(loss).backward()
-		scale_before_step = scaler.get_scale()
-		scaler.step(optimizer)
-		scaler.update()
-		scale_after_step = scaler.get_scale()
+		scaler.scale(loss / grad_accum_steps).backward()
 
-		if scale_after_step >= scale_before_step:
-			scheduler.step()
+		should_step = ((batch + 1) % grad_accum_steps == 0) or ((batch + 1) == len(train_loader))
+		if should_step:
+			scale_before_step = scaler.get_scale()
+			scaler.step(optimizer)
+			scaler.update()
+			scale_after_step = scaler.get_scale()
+			optimizer.zero_grad(set_to_none=True)
+
+			if scale_after_step >= scale_before_step:
+				scheduler.step()
 
 		running_loss += loss.item()
 		avg_loss = running_loss / (batch + 1)
@@ -215,12 +221,15 @@ def get_dataloaders():
 	return train_dataloader, val_dataloader
 
 def setup_scheduler(train_loader, optimizer):
+	steps_per_epoch = max(1, math.ceil(len(train_loader) / GRAD_ACCUM_STEPS))
+	total_steps = NUM_EPOCHS * steps_per_epoch
 	warmup_steps = min(
-		max(0, WARMUP_EPOCHS * len(train_loader)),
-		max(0, NUM_EPOCHS * len(train_loader) - 1),
+		max(0, WARMUP_EPOCHS * steps_per_epoch),
+		max(0, total_steps - 1),
 	)
 
-	scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS * len(train_loader) - warmup_steps, eta_min=LEARNING_RATE * 0.1)
+	cosine_steps = max(1, total_steps - warmup_steps)
+	scheduler = CosineAnnealingLR(optimizer, T_max=cosine_steps, eta_min=LEARNING_RATE * 0.1)
 
 	if warmup_steps > 0:
 		warmup_scheduler = LinearLR(
@@ -237,7 +246,10 @@ def setup_scheduler(train_loader, optimizer):
 	return scheduler
 
 def main(device, model_path):
-	model = SegFormer(num_classes=NUM_CLASSES).to(device=device, non_blocking=True)
+	if GRAD_ACCUM_STEPS < 1:
+		raise ValueError(f"GRAD_ACCUM_STEPS must be >= 1, got {GRAD_ACCUM_STEPS}")
+
+	model = SegFormer(num_classes=NUM_CLASSES, use_gradient_checkpointing=USE_GRADIENT_CHECKPOINTING).to(device=device, non_blocking=True)
 	
 	train_loader, validation_loader = get_dataloaders()
 
@@ -247,7 +259,7 @@ def main(device, model_path):
 
 	model.train()
 	for epoch in range(start_epoch, NUM_EPOCHS):
-		train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion)
+		train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion, GRAD_ACCUM_STEPS)
 
 		if (epoch + 1) % VAL_INTERVAL == 0:
 			validate(model, validation_loader, device, criterion)

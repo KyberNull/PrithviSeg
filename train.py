@@ -7,6 +7,7 @@ pretraining so train.py can be reserved for downstream/domain training.
 
 from datasets import geospatial_dataset
 import logging
+import math
 from losses import dice_loss, iou_metric, iou_metric_processed_fast, focal_loss
 from model import SegFormer
 import signal
@@ -32,16 +33,19 @@ NUM_EPOCHS_PHASE_3 = NUM_EPOCHS_PRETRAIN + 50
 NUM_WORKERS = 2
 VAL_INTERVAL = 1
 NUM_VAL_SAMPLES = 280
+GRAD_ACCUM_STEPS = 1
+USE_GRADIENT_CHECKPOINTING = False
 ###-----------------------###
 
 pin_memory = False
 amp_dtype = torch.bfloat16
 logger = logging.getLogger(__name__)
 
-def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion):
+def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion, grad_accum_steps):
 	"""Trains one batch of images"""
 	epoch_bar = tqdm(train_loader, desc=f"[Train] Epoch {epoch + 1}/{NUM_EPOCHS_PHASE_3}", leave=True, disable=not sys.stdout.isatty(), position=0 )
 	running_loss = 0.0
+	optimizer.zero_grad(set_to_none=True)
 
 	for batch, (input_tensor, output_tensor) in enumerate(epoch_bar):
 		if shutdown_requested:
@@ -50,8 +54,6 @@ def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criter
 
 		input_tensor = input_tensor.to(device, non_blocking=True)
 		output_tensor = output_tensor.squeeze(1).to(device, non_blocking=True).long()
-
-		optimizer.zero_grad(set_to_none=True)
 
 		with autocast(device_type=device.type, dtype=amp_dtype):
 			backends = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
@@ -66,14 +68,18 @@ def train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criter
 			optimizer.zero_grad(set_to_none=True)
 			continue
 
-		scaler.scale(loss).backward()
-		scale_before_step = scaler.get_scale()
-		scaler.step(optimizer)
-		scaler.update()
-		scale_after_step = scaler.get_scale()
+		scaler.scale(loss / grad_accum_steps).backward()
 
-		if scale_after_step >= scale_before_step:
-			scheduler.step()
+		should_step = ((batch + 1) % grad_accum_steps == 0) or ((batch + 1) == len(train_loader))
+		if should_step:
+			scale_before_step = scaler.get_scale()
+			scaler.step(optimizer)
+			scaler.update()
+			scale_after_step = scaler.get_scale()
+			optimizer.zero_grad(set_to_none=True)
+
+			if scale_after_step >= scale_before_step:
+				scheduler.step()
 
 		running_loss += loss.item()
 		avg_loss = running_loss / (batch + 1)
@@ -217,12 +223,16 @@ def get_dataloaders():
 	return train_dataloader, val_dataloader
 
 def setup_scheduler(train_loader, optimizer):
+	steps_per_epoch = max(1, math.ceil(len(train_loader) / GRAD_ACCUM_STEPS))
+	total_steps = NUM_EPOCHS_PHASE_3 * steps_per_epoch
+	pretrain_steps = NUM_EPOCHS_PRETRAIN * steps_per_epoch
 	warmup_steps = min(
-		max(0, WARMUP_EPOCHS * len(train_loader)),
-		max(0, NUM_EPOCHS_PHASE_3 * len(train_loader) - 1),
+		max(0, WARMUP_EPOCHS * steps_per_epoch),
+		max(0, total_steps - 1),
 	)
 
-	scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS_PHASE_3 * len(train_loader) - warmup_steps - NUM_EPOCHS_PRETRAIN, eta_min=LEARNING_RATE * 0.1)
+	cosine_steps = max(1, total_steps - warmup_steps - pretrain_steps)
+	scheduler = CosineAnnealingLR(optimizer, T_max=cosine_steps, eta_min=LEARNING_RATE * 0.1)
 
 	if warmup_steps > 0:
 		warmup_scheduler = LinearLR(
@@ -239,7 +249,10 @@ def setup_scheduler(train_loader, optimizer):
 	return scheduler
 
 def main(device, model_path):
-	model = SegFormer(num_classes=NUM_CLASSES)
+	if GRAD_ACCUM_STEPS < 1:
+		raise ValueError(f"GRAD_ACCUM_STEPS must be >= 1, got {GRAD_ACCUM_STEPS}")
+
+	model = SegFormer(num_classes=NUM_CLASSES, use_gradient_checkpointing=USE_GRADIENT_CHECKPOINTING)
 	model = torch.compile(model)
 	model = model.to(device=device, non_blocking=True)
 
@@ -256,7 +269,7 @@ def main(device, model_path):
 	model.train()
 
 	for epoch in range(start_epoch, NUM_EPOCHS_PHASE_3):
-		train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion)
+		train_batch(model, epoch, train_loader, optimizer, scheduler, scaler, criterion, GRAD_ACCUM_STEPS)
 
 		if (epoch + 1) % VAL_INTERVAL == 0:
 			validate(model, validation_loader, device, criterion, epoch)
