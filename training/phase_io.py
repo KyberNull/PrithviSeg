@@ -5,7 +5,7 @@ from torch import optim
 from torch.utils.data import DataLoader
 
 
-def load_checkpoint_phase3(*, path, model, start_epoch_default, logger, optimizer=None, scheduler=None, scaler=None):
+def load_checkpoint_train(*, path, model, start_epoch_default, logger, optimizer=None, scheduler=None, scaler=None):
     start_epoch = start_epoch_default
     new_segmentation_head = False
 
@@ -53,7 +53,7 @@ def load_checkpoint_phase3(*, path, model, start_epoch_default, logger, optimize
     return start_epoch
 
 
-def load_checkpoint_phase2(
+def load_checkpoint_pretrain(
     *,
     model_path,
     model,
@@ -109,22 +109,22 @@ def load_checkpoint_phase2(
                 state_dict.pop(k, None)
 
         model.load_state_dict(state_dict, strict=False)
-        is_phase_2_resume = 0 < ckpt_epoch < total_epochs
+        is_pretrain_resume = 0 < ckpt_epoch < total_epochs
         has_train_state = all(k in ckpt for k in ("optim_state", "scheduler_state", "scaler_state"))
 
         if keys_to_remove:
             logger.warning("Head class mismatch detected earlier; resetting optimizer/scheduler/scaler.")
             start_epoch = 0
-        elif is_phase_2_resume and has_train_state:
+        elif is_pretrain_resume and has_train_state:
             optimizer.load_state_dict(ckpt["optim_state"])
             scheduler.load_state_dict(ckpt["scheduler_state"])
             scaler.load_state_dict(ckpt["scaler_state"])
             start_epoch = ckpt_epoch
-            logger.info("Resuming phase-2 optimizer/scheduler state.")
+            logger.info("Resuming pretrain optimizer/scheduler state.")
         else:
             start_epoch = 0
             if ckpt_epoch >= total_epochs:
-                logger.info("Phase-2 checkpoint already complete; starting with fresh optimizer/scheduler.")
+                logger.info("Pretrain checkpoint already complete; starting with fresh optimizer/scheduler.")
             else:
                 logger.info("Using checkpoint model weights with fresh optimizer/scheduler/scaler.")
 
@@ -138,7 +138,7 @@ def load_checkpoint_phase2(
     return model, optimizer, scheduler, scaler, start_epoch, train_loader
 
 
-def get_phase3_dataloaders(
+def get_train_dataloaders(
     *,
     geospatial_dataset_cls,
     train_img_dir,
@@ -171,7 +171,7 @@ def get_phase3_dataloaders(
     return train_dataloader, val_dataloader
 
 
-def get_phase2_dataloaders(
+def get_pretrain_dataloaders(
     *,
     loveda_cls,
     root,

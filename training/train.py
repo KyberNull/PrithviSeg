@@ -7,13 +7,13 @@ pretraining so train.py can be reserved for downstream/domain training.
 
 from config.pretrain import NUM_EPOCHS_PRETRAIN
 from config.train import (
-	NUM_CLASSES_PHASE_3,
-	NUM_EPOCHS_PHASE_3,
-	NUM_VAL_SAMPLES_PHASE_3,
-	PHASE3_TRAIN_IMG_DIR,
-	PHASE3_TRAIN_MASK_DIR,
-	PHASE3_VAL_IMG_DIR,
-	PHASE3_VAL_MASK_DIR,
+	NUM_CLASSES_TRAIN,
+	NUM_EPOCHS_TRAIN,
+	NUM_VAL_SAMPLES_TRAIN,
+	TRAIN_IMG_DIR,
+	TRAIN_MASK_DIR,
+	VAL_IMG_DIR,
+	VAL_MASK_DIR,
 )
 from config.shared import (
 	BATCH_SIZE,
@@ -30,7 +30,7 @@ import logging
 from losses import dice_loss, focal_loss
 from model import SegFormer
 from .primitives import setup_scheduler, train_batch, validate
-from .phase_io import get_phase3_dataloaders, load_checkpoint_phase3
+from .phase_io import get_train_dataloaders, load_checkpoint_train
 import signal
 import torch
 from torch import optim
@@ -39,8 +39,8 @@ import utils
 from utils import get_adamw_param_groups, save_checkpoint, device_setup, setup_logging, handle_shutdown
 
 ###-------CONSTANTS-------###
-NUM_CLASSES = NUM_CLASSES_PHASE_3
-NUM_VAL_SAMPLES = NUM_VAL_SAMPLES_PHASE_3
+NUM_CLASSES = NUM_CLASSES_TRAIN
+NUM_VAL_SAMPLES = NUM_VAL_SAMPLES_TRAIN
 ###-----------------------###
 
 pin_memory = False
@@ -55,12 +55,12 @@ def main(device, model_path):
 	model = torch.compile(model)
 	model = model.to(device=device, non_blocking=True)
 
-	train_loader, validation_loader = get_phase3_dataloaders(
+	train_loader, validation_loader = get_train_dataloaders(
 		geospatial_dataset_cls=GeospatialDataset,
-		train_img_dir=PHASE3_TRAIN_IMG_DIR,
-		train_mask_dir=PHASE3_TRAIN_MASK_DIR,
-		val_img_dir=PHASE3_VAL_IMG_DIR,
-		val_mask_dir=PHASE3_VAL_MASK_DIR,
+		train_img_dir=TRAIN_IMG_DIR,
+		train_mask_dir=TRAIN_MASK_DIR,
+		val_img_dir=VAL_IMG_DIR,
+		val_mask_dir=VAL_MASK_DIR,
 		train_transform=TrainTransforms(),
 		eval_transform=EvalTransforms(),
 		batch_size=BATCH_SIZE,
@@ -73,7 +73,7 @@ def main(device, model_path):
 		train_loader=train_loader,
 		optimizer=optimizer,
 		grad_accum_steps=GRAD_ACCUM_STEPS,
-		total_epochs=NUM_EPOCHS_PHASE_3,
+		total_epochs=NUM_EPOCHS_TRAIN,
 		warmup_epochs=WARMUP_EPOCHS,
 		learning_rate=LEARNING_RATE,
 		warmup_start_factor=0.01,
@@ -81,7 +81,7 @@ def main(device, model_path):
 	)
 	scaler = torch.GradScaler(enabled=(device.type == "cuda")) # GradScaler is only useful on CUDA where float16 gradients can underflow.
 
-	start_epoch = load_checkpoint_phase3(
+	start_epoch = load_checkpoint_train(
 		path=model_path,
 		model=model,
 		start_epoch_default=NUM_EPOCHS_PRETRAIN,
@@ -95,11 +95,11 @@ def main(device, model_path):
 
 	model.train()
 
-	for epoch in range(start_epoch, NUM_EPOCHS_PHASE_3):
+	for epoch in range(start_epoch, NUM_EPOCHS_TRAIN):
 		train_batch(
 			model=model,
 			epoch=epoch,
-			total_epochs=NUM_EPOCHS_PHASE_3,
+			total_epochs=NUM_EPOCHS_TRAIN,
 			train_loader=train_loader,
 			optimizer=optimizer,
 			scheduler=scheduler,
@@ -133,4 +133,4 @@ def main(device, model_path):
 
 		save_checkpoint(model, optimizer, scheduler, scaler, epoch, MODEL_PATH)
 
-	logger.info("Pretraining complete. Checkpoint saved.")
+	logger.info("Training complete. Checkpoint saved.")

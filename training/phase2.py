@@ -9,8 +9,8 @@ from config.pretrain import (
 	NUM_CLASSES_PRETRAIN,
 	NUM_EPOCHS_PRETRAIN,
 	NUM_VAL_SAMPLES_PRETRAIN,
-	PHASE2_DATA_ROOT,
-	PHASE2_SCENES,
+	PRETRAIN_DATA_ROOT,
+	PRETRAIN_SCENES,
 )
 from config.shared import (
 	BATCH_SIZE,
@@ -27,7 +27,7 @@ import logging
 from losses import dice_loss, focal_loss
 from model import SegFormer
 from .primitives import setup_scheduler, train_batch, validate
-from .phase_io import get_phase2_dataloaders, load_checkpoint_phase2
+from .phase_io import get_pretrain_dataloaders, load_checkpoint_pretrain
 import signal
 import torch
 from torchgeo.datasets import LoveDA
@@ -51,10 +51,10 @@ def main(device, model_path):
 
 	model = SegFormer(num_classes=NUM_CLASSES, use_gradient_checkpointing=USE_GRADIENT_CHECKPOINTING).to(device=device, non_blocking=True)
 	
-	train_loader, validation_loader = get_phase2_dataloaders(
+	train_loader, validation_loader = get_pretrain_dataloaders(
 		loveda_cls=LoveDA,
-		root=PHASE2_DATA_ROOT,
-		scenes=PHASE2_SCENES,
+		root=PRETRAIN_DATA_ROOT,
+		scenes=PRETRAIN_SCENES,
 		train_transform=TrainTransforms(),
 		eval_transform=EvalTransforms(),
 		batch_size=BATCH_SIZE,
@@ -63,7 +63,7 @@ def main(device, model_path):
 	)
 
 	model = torch.compile(model)
-	model, optimizer, scheduler, scaler, start_epoch, train_loader = load_checkpoint_phase2(
+	model, optimizer, scheduler, scaler, start_epoch, train_loader = load_checkpoint_pretrain(
 		model_path=model_path,
 		model=model,
 		train_loader=train_loader,
