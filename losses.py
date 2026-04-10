@@ -4,8 +4,9 @@ import torch
 import segmentation_models_pytorch as smp
 
 focal_loss = smp.losses.FocalLoss(
-    mode="multiclass",   # important for your case
+    mode="multiclass",   # important for our case
     gamma=2.0,
+    alpha=0.25,
 )
 
 def dice_loss(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth=1e-8):
