@@ -23,6 +23,7 @@ def train_batch(
     scaler,
     criterion,
     dice_loss_fn,
+    dou_loss_fn,
     num_classes,
     grad_accum_steps,
     phase_label,
@@ -55,6 +56,7 @@ def train_batch(
                 prediction = model(input_tensor)
             loss = criterion(prediction, output_tensor) + ll(prediction, output_tensor)
             loss += dice_loss_fn(prediction, output_tensor, num_classes)
+            loss += dou_loss_fn(prediction, output_tensor, num_classes)
 
         if not torch.isfinite(loss):
             logger.warning(f"Non-finite loss at epoch {epoch+1}, batch {batch}; skipping step.")

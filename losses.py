@@ -114,3 +114,31 @@ def iou_metric_processed_fast(pred, target, num_classes, eps=1e-6):
     iou = (intersection + eps) / (union + eps)
 
     return iou.mean()
+
+def dou_loss(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth=1e-8, alpha = 0.8):
+    pred = torch.softmax(pred, dim=1)
+
+    # VOC uses label 255 as ignore; exclude those pixels from Dice computation.
+    valid_mask = (target != 255)
+    target = target.clone()
+    target[~valid_mask] = 0  # temporary safe value
+
+    # one_hot returns [N, H, W, C], so permute to [N, C, H, W] for channel-wise math.
+    target_onehot = torch.nn.functional.one_hot(target, num_classes)
+    target_onehot = target_onehot.permute(0, 3, 1, 2).float()
+
+    valid_mask = valid_mask.unsqueeze(1)
+
+    pred = pred * valid_mask
+    target_onehot = target_onehot * valid_mask
+
+    intersection = torch.sum(pred * target_onehot, dim=(2, 3))
+    union = torch.sum(pred, dim=(2, 3)) + torch.sum(target_onehot, dim=(2, 3))
+
+    dou_loss = (union - intersection + smooth) / (union - alpha * intersection + smooth)
+
+    # Average only over classes present in the target to avoid skew from absent classes.
+    class_present = torch.sum(target_onehot, dim=(2, 3)) > 0
+    dou_loss = torch.sum(dou_loss * class_present, dim=1) / torch.sum(class_present, dim=1).clamp_min(1)
+
+    return dou_loss.mean()

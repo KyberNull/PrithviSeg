@@ -27,7 +27,7 @@ from config.shared import (
 	WEIGHT_DECAY,
 )
 import logging
-from losses import dice_loss, focal_loss
+from losses import dice_loss, dou_loss, focal_loss
 from model import SegFormer
 from .primitives import setup_scheduler, train_batch, validate
 from .phase_io import get_train_dataloaders, load_checkpoint_train
@@ -106,6 +106,7 @@ def main(device, model_path):
 			scaler=scaler,
 			criterion=criterion,
 			dice_loss_fn=dice_loss,
+			dou_loss_fn=dou_loss,
 			num_classes=NUM_CLASSES,
 			grad_accum_steps=GRAD_ACCUM_STEPS,
 			phase_label="Train",
