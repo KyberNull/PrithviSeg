@@ -44,10 +44,13 @@ class TrainTransforms:
         mask_np = np.asarray(mask, dtype=np.int64)
         mask = tv_tensors.Mask(torch.from_numpy(self.noisy_segment(mask_np)))
         image = F.to_image(image)
+
+
         luma = 0.299 * image[0] + 0.587 * image[1] + 0.114 * image[2]
         shadow_score = (luma < 0.3).float().mean().item()
         contrast_score = torch.std(luma).item()
 
+        
         if shadow_score > 0.3:
             probs = (0.3, 0.2, 0.5)
         elif contrast_score < 0.08:

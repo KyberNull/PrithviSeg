@@ -11,6 +11,7 @@ import torch
 class PostProcessing:
     def __init__(self, num_classes):
         self.num_classes = num_classes
+
         # Global class ids: 0 background, 1 roads, 2 buildings, 3 water.
         self.processors = {1: PostProcessingRoads(), 2: PostProcessingBuildings(), 3: PostProcessingWater()}
 
@@ -21,8 +22,11 @@ class PostProcessing:
         return self._process_single(probs)
 
     def _process_single(self, probs):
+        #Creates a mask with only 0s to edit 
         base_mask = torch.argmax(probs, dim=0).cpu().numpy().astype(np.uint8)
         final_mask = np.zeros_like(base_mask)
+
+        #For each class choose a specific function of post-processing, merge the masks and return the finalized_mask
         for cls_id, processor in self.processors.items():
             cls_mask = (base_mask == cls_id).astype(np.uint8)
             if np.any(cls_mask):
@@ -32,9 +36,10 @@ class PostProcessing:
                 final_mask[processed_cls > 0] = cls_id
         return torch.from_numpy(final_mask).long()
 
+    
     def _safe_draw(self, mask, contour, color=1):
         pts = [contour.astype(np.int32)]
-        cv2.drawContours(mask, pts, -1, color, thickness=-1)
+        cv2.drawContours(mask, pts, -1, color, thickness=1)
 
 
 class PostProcessingRoads:
