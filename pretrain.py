@@ -3,7 +3,7 @@
 import signal
 
 from config.shared import MODEL_PATH
-from training.train import main
+from training.pretrain import main
 from utils import device_setup, handle_shutdown, setup_logging
 
 
