@@ -2,18 +2,21 @@
 
 import cv2
 import numpy as np
-from scipy.ndimage import convolve, median_filter
-from scipy.spatial import KDTree
-from skimage.morphology import remove_small_objects, skeletonize
+from skimage.morphology import skeletonize
 import torch
 
 
 class PostProcessing:
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, road_thickness=3):
         self.num_classes = num_classes
+        self.road_thickness = road_thickness
 
         # Global class ids: 0 background, 1 roads, 2 buildings, 3 water.
-        self.processors = {1: PostProcessingRoads(), 2: PostProcessingBuildings(), 3: PostProcessingWater()}
+        self.processors = {
+            1: PostProcessingRoads(thickness=road_thickness),
+            2: PostProcessingBuildings(),
+            3: PostProcessingWater(),
+        }
 
     def __call__(self, logits):
         probs = torch.softmax(logits, dim=1)
@@ -36,95 +39,61 @@ class PostProcessing:
                 final_mask[processed_cls > 0] = cls_id
         return torch.from_numpy(final_mask).long()
 
-    
-    def _safe_draw(self, mask, contour, color=1):
-        pts = [contour.astype(np.int32)]
-        cv2.drawContours(mask, pts, -1, color, thickness=1)
-
 
 class PostProcessingRoads:
-    def __init__(self, min_area=64, connect_dist=80, min_branch=10):
+    def __init__(self, min_area=200, connect_dist=80, min_branch=2, thickness=5):
         self.min_area = min_area
         self.connect_dist = connect_dist
         self.min_branch = min_branch
-        self.kernel = np.ones((3, 3), np.uint8)
+        self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        self.blur_kernel = (3,3)
+        self.thickness = max(1, int(thickness))
 
     def __call__(self, mask):
         if torch.is_tensor(mask):
             mask = mask.cpu().numpy().astype(np.uint8)
         if mask.sum() == 0:
             return mask
-        original_mask = mask.copy()
 
+        # Initial denoise and edge smooth.
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.kernel)
-        mask = remove_small_objects(mask.astype(bool), min_size=self.min_area)
-        mask = mask.astype(np.uint8)
+        soft_mask = cv2.GaussianBlur((mask * 255).astype(np.uint8), self.blur_kernel, 0)
+        _, mask = cv2.threshold(soft_mask, 120, 1, cv2.THRESH_BINARY)
 
-        # If pruning removed everything, keep the model prediction.
-        if mask.sum() == 0:
-            return original_mask
 
-        dist_map = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
-        dist_map = median_filter(dist_map, size=5)
-        skeleton = skeletonize(mask > 0)
-        skeleton = skeleton.astype(np.uint8)
-        skeleton = remove_small_objects(skeleton.astype(bool), min_size=self.min_branch)
-        skeleton = skeleton.astype(np.uint8)
-
-        # Skeleton pruning can be too aggressive for thin roads.
-        if skeleton.sum() == 0:
-            return mask
-
-        skeleton = self._connect_endpoints(skeleton)
-        num_labels, labels = cv2.connectedComponents(skeleton)
-        reconstructed = np.zeros_like(mask, dtype=np.uint8)
-
+        # Remove tiny disconnected road islands before skeletonization.
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        cleaned = np.zeros_like(mask, dtype=np.uint8)
         for label in range(1, num_labels):
-            component = labels == label
-            ys, xs = np.where(component)
-            if len(ys) < 8:
-                continue
-            widths = dist_map[ys, xs]
-            widths = widths[widths > 0]
-            if len(widths) == 0:
-                continue
-            radius = max(1, int(np.round(np.median(widths))))
-            if radius < 1:
-                continue
-            for y, x in zip(ys, xs):
-                cv2.circle(reconstructed, (x, y), radius, 1, -1)
-
-        reconstructed = cv2.morphologyEx(reconstructed, cv2.MORPH_CLOSE, self.kernel)
-
-        # Preserve cleaned mask if reconstruction is empty.
-        if reconstructed.sum() == 0:
+            if stats[label, cv2.CC_STAT_AREA] >= self.min_area:
+                cleaned[labels == label] = 1
+        if cleaned.sum() == 0:
             return mask
 
-        return reconstructed.astype(np.uint8)
+        # Keep only meaningful skeleton branches, then regrow to smoother roads.
+        skel = skeletonize(cleaned > 0).astype(np.uint8)
+        if skel.sum() == 0:
+            return cleaned
 
-    def _connect_endpoints(self, skel):
-        endpoints = self._find_endpoints(skel)
-        if len(endpoints) < 2:
-            return skel
-        tree = KDTree(endpoints)
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(skel, connectivity=8)
+        skel_clean = np.zeros_like(skel, dtype=np.uint8)
+        for label in range(1, num_labels):
+            if stats[label, cv2.CC_STAT_AREA] >= self.min_branch:
+                skel_clean[labels == label] = 1
+        if skel_clean.sum() == 0:
+            skel_clean = skel
 
-        for i, p in enumerate(endpoints):
-            dists, idxs = tree.query(p, k=4, distance_upper_bound=self.connect_dist)
-            for j in np.atleast_1d(idxs):
-                if j == i or j >= len(endpoints):
-                    continue
-                q = endpoints[j]
-                if np.linalg.norm(p - q) < 10:
-                    continue
-                cv2.line(skel, (int(p[1]), int(p[0])), (int(q[1]), int(q[0])), 1, 1)
+        # Iterative dilation gives a clearer, predictable thickness control.
+        grow_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        regrown = cv2.dilate(skel_clean, grow_kernel, iterations=self.thickness)
+        # Never let postprocessing make roads thinner than the cleaned input mask.
+        regrown = np.maximum(regrown, cleaned).astype(np.uint8)
 
-        return skel
-
-    def _find_endpoints(self, skel):
-        kernel = np.array([[1, 1, 1], [1, 10, 1], [1, 1, 1]])
-        conv = convolve(skel, kernel, mode="constant", cval=0)
-        endpoints = conv == 11
-        return np.column_stack(np.where(endpoints))
+        # Final smooth and binarize for cleaner boundaries.
+        regrown = cv2.morphologyEx(regrown, cv2.MORPH_CLOSE, self.kernel)
+        regrown_soft = cv2.GaussianBlur((regrown * 255).astype(np.uint8), self.blur_kernel, 0)
+        _, regrown = cv2.threshold(regrown_soft, 96, 1, cv2.THRESH_BINARY)
+        return (regrown > 0).astype(np.uint8)
 
 
 class PostProcessingBuildings:

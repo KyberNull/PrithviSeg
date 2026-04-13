@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 
 def test_model():
+    results_to_view.clear()
+
     test_dataset = GeospatialDataset(
         img_dir=INPUT_DIR,
         img_mask=MASK_DIR,
@@ -117,9 +119,6 @@ def test_model():
                             "pixel_acc_processed": sample_pix_acc_processed,
                         }
                     )
-
-            if len(results_to_view) >= MAX_EXAMPLES:
-                break
 
     if count == 0:
         logger.warning("No samples were evaluated.")
