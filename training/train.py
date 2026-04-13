@@ -31,12 +31,11 @@ from losses import dice_loss, dou_loss, focal_loss
 from model import SegFormer
 from .primitives import setup_scheduler, train_batch, validate
 from .phase_io import get_train_dataloaders, load_checkpoint_train
-import signal
 import torch
 from torch import optim
 from processing import EvalTransforms, PostProcessing, TrainTransforms, GeospatialDataset
 import utils
-from utils import get_adamw_param_groups, save_checkpoint, device_setup, setup_logging, handle_shutdown
+from utils import get_adamw_param_groups, save_checkpoint
 
 ###-------CONSTANTS-------###
 NUM_CLASSES = NUM_CLASSES_TRAIN
