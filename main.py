@@ -1,3 +1,5 @@
+"""This script implements a complete pipeline for processing large geospatial .tiff images using a SegFormer"""
+
 from config.inference import (
     NUM_CLASSES_INFERENCE,
     PATCH_SIZE,
@@ -7,8 +9,6 @@ from config.inference import (
     USE_TORCH_COMPILE,
 )
 from config.shared import MODEL_PATH
-"""This script implements a complete pipeline for processing large geospatial .tiff images using a SegFormer"""
-
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import geopandas as gpd
 import logging
@@ -98,17 +98,20 @@ def vectorize_chunk(args):
     """Processes a small chunk of the predicted data into polygons"""
     chunk_mask, chunk_transform, class_val = args
     binary_mask = (chunk_mask == class_val).astype(np.uint8)
-    if not np.any(binary_mask): return []
+    if not np.any(binary_mask):
+        return []
     
     shapes = features.shapes(chunk_mask, mask=binary_mask, transform=chunk_transform)
     geometries = []
     for geom, _ in shapes:
         try:
             s = shape(geom)
-            if not s.is_valid: s = make_valid(s)
+            if not s.is_valid:
+                s = make_valid(s)
             if not s.is_empty and s.geom_type in ['Polygon', 'MultiPolygon']:
                 geometries.append(s)
-        except: continue
+        except:
+            continue
     return geometries
 
 def main():
@@ -123,7 +126,7 @@ def main():
     model.load_state_dict(state_dict)
     model.eval()
     
-    transform = EvalTransforms(size=(512, 512))
+    transform = EvalTransforms()
     post_processor = PostProcessing(NUM_CLASSES)
 
     input_file = input("Enter the .tiff file name: ").strip()
@@ -216,7 +219,8 @@ def main():
                 futures = [executor.submit(vectorize_chunk, t) for t in tasks]
                 for f in as_completed(futures):
                     res = f.result()
-                    if res: all_geoms.extend(res)
+                    if res:
+                        all_geoms.extend(res)
 
         if all_geoms:
             # Re-open original to get CRS
