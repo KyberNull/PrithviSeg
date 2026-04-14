@@ -8,7 +8,7 @@ from torch import autocast
 from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
-
+from processing.preprocessing import apply_preprocess
 from losses import iou_metric, iou_metric_processed_fast
 from segmentation_models_pytorch.losses import LovaszLoss
 
@@ -49,6 +49,9 @@ def train_batch(
 
         input_tensor = input_tensor.to(device, non_blocking=True)
         output_tensor = output_tensor.squeeze(1).to(device, non_blocking=True).long()
+        
+        with torch.no_grad():
+            input_tensor = apply_preprocess(input_tensor)
 
         with autocast(device_type=device.type, dtype=amp_dtype):
             backends = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]

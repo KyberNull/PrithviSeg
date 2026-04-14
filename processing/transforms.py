@@ -2,9 +2,7 @@
 
 import numpy as np
 import torch
-from processing import IMAGENET_MEAN, IMAGENET_STD
 from processing.nsegment import NoisySegmentPlus
-from .preprocessing import apply_preprocessing, apply_clahe
 from torchvision import tv_tensors
 from torchvision.transforms import v2
 from torchvision.transforms.v2 import functional as F
@@ -42,22 +40,6 @@ class TrainTransforms:
         mask = tv_tensors.Mask(torch.from_numpy(self.noisy_segment(mask_np)))
         image = F.to_image(image)
 
-
-        luma = 0.299 * image[0] + 0.587 * image[1] + 0.114 * image[2]
-        shadow_score = (luma < 0.3).float().mean().item()
-        contrast_score = torch.std(luma).item()
-
-        
-        if shadow_score > 0.3:
-            probs = (0.3, 0.2, 0.5)
-        elif contrast_score < 0.08:
-            probs = (0.3, 0.5, 0.2)
-        else:
-            probs = (0.5, 0.25, 0.25)
-
-        mode = np.random.choice(("original", "clahe", "shadow"), p=probs)
-        image = apply_preprocessing(image, mode)
-        image = F.normalize(image, mean=IMAGENET_MEAN, std=IMAGENET_STD)
         mask = mask.to(torch.int64)
         return image, mask
 
@@ -75,10 +57,5 @@ class EvalTransforms:
         image, mask = tv_tensors.Image(image), tv_tensors.Mask(mask)
         image = F.to_dtype(image, torch.float32, scale=True)
         image = F.to_image(image)
-        luma = 0.299 * image[0] + 0.587 * image[1] + 0.114 * image[2]
-        contrast_score = torch.std(luma).item()
-        if contrast_score < 0.08:
-            image = apply_clahe(image)
-        image = F.normalize(image, mean=IMAGENET_MEAN, std=IMAGENET_STD)
         mask = mask.to(torch.int64)
         return image, mask
