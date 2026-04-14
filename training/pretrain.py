@@ -27,13 +27,12 @@ import logging
 from losses import dice_loss, dou_loss, focal_loss
 from model import SegFormer
 from .primitives import setup_scheduler, train_batch, validate
-from .phase_io import get_pretrain_dataloaders, load_checkpoint_pretrain
-import signal
+from .dataset_io import get_pretrain_dataloaders, load_checkpoint_pretrain
 import torch
 from torchgeo.datasets import LoveDA
 from processing import EvalTransforms, TrainTransforms
 import utils
-from utils import get_adamw_param_groups, save_checkpoint, device_setup, setup_logging, handle_shutdown
+from utils import get_adamw_param_groups, save_checkpoint
 
 ###-------CONSTANTS-------###
 NUM_CLASSES = NUM_CLASSES_PRETRAIN
@@ -120,15 +119,5 @@ def main(device, model_path):
 		save_checkpoint(model, optimizer, scheduler, scaler, epoch, MODEL_PATH)
 
 	logger.info("Pretraining complete. Checkpoint saved.")
-
-if __name__ == "__main__":
-    signal.signal(signal.SIGINT, handle_shutdown)
-    signal.signal(signal.SIGTERM, handle_shutdown)
-
-    device, pin_memory, amp_dtype = device_setup()
-
-    setup_logging()
-
-    main(device, MODEL_PATH)
 
 
