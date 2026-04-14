@@ -9,8 +9,7 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
 from processing.preprocessing import apply_preprocess
-from losses import iou_metric, iou_metric_processed_fast
-from segmentation_models_pytorch.losses import LovaszLoss
+from losses import iou_metric, iou_metric_processed_fast, lovasz_loss
 
 def train_batch(
     *,
@@ -40,7 +39,7 @@ def train_batch(
     optimizer.zero_grad(set_to_none=True)
 
     
-    ll = LovaszLoss(mode="multiclass", ignore_index=0)
+    ll = lovasz_loss
 
     for batch, (input_tensor, output_tensor) in enumerate(epoch_bar):
         if should_stop():
@@ -112,6 +111,9 @@ def validate(
 
             val_input = val_input.to(device, non_blocking=True)
             val_output = val_output.squeeze(1).to(device, non_blocking=True).long()
+
+            with torch.no_grad():
+                val_input = apply_preprocess(val_input)
 
             with autocast(device_type=device.type, dtype=amp_dtype):
                 val_prediction = model(val_input)
