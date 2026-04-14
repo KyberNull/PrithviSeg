@@ -165,8 +165,7 @@ def get_train_dataloaders(
     )
     val_dataloader = DataLoader(
         dataset=val_dataset,
-        shuffle=False,
-        num_workers=num_workers,
+        batch_size=8,
         pin_memory=pin_memory,
     )
     return train_dataloader, val_dataloader
