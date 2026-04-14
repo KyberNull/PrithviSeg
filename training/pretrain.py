@@ -18,6 +18,7 @@ from config.shared import (
 	LEARNING_RATE,
 	MODEL_PATH,
 	NUM_WORKERS,
+	PREFETCH_FACTOR,
 	USE_GRADIENT_CHECKPOINTING,
 	VAL_INTERVAL,
 	WARMUP_EPOCHS,
@@ -27,7 +28,7 @@ import logging
 from losses import dice_loss, dou_loss, focal_loss
 from model import SegFormer
 from .primitives import setup_scheduler, train_batch, validate
-from .dataset_io import get_pretrain_dataloaders, load_checkpoint_pretrain
+from .io import get_pretrain_dataloaders, load_checkpoint_pretrain
 import torch
 from torchgeo.datasets import LoveDA
 from processing import EvalTransforms, TrainTransforms
@@ -58,6 +59,7 @@ def main(device, model_path):
 		eval_transform=EvalTransforms(),
 		batch_size=BATCH_SIZE,
 		num_workers=NUM_WORKERS,
+		prefetch_factor=PREFETCH_FACTOR,
 		pin_memory=pin_memory,
 	)
 

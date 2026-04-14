@@ -149,6 +149,7 @@ def get_train_dataloaders(
     eval_transform,
     batch_size,
     num_workers,
+    prefetch_factor,
     pin_memory,
 ):
     train_dataset = geospatial_dataset_cls(img_dir=train_img_dir, img_mask=train_mask_dir, transform=train_transform)
@@ -160,7 +161,7 @@ def get_train_dataloaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
-        prefetch_factor=1,
+        prefetch_factor=prefetch_factor,
     )
     val_dataloader = DataLoader(
         dataset=val_dataset,
@@ -180,6 +181,7 @@ def get_pretrain_dataloaders(
     eval_transform,
     batch_size,
     num_workers,
+    prefetch_factor,
     pin_memory,
 ):
     train_dataset = loveda_cls(root=root, split="train", scene=scenes, transforms=train_transform, download=False)
@@ -191,7 +193,7 @@ def get_pretrain_dataloaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
-        prefetch_factor=1,
+        prefetch_factor=prefetch_factor,
     )
     val_dataloader = DataLoader(dataset=val_dataset, shuffle=False, pin_memory=pin_memory)
     return train_dataloader, val_dataloader
