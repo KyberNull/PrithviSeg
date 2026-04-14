@@ -20,7 +20,7 @@ import sys
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from processing import EvalTransforms, IMAGENET_MEAN, IMAGENET_STD, PostProcessing, GeospatialDataset
+from processing import EvalTransforms, IMAGENET_MEAN, IMAGENET_STD, PostProcessing, GeospatialDataset, apply_preprocess
 from utils import device_setup, setup_logging, handle_shutdown, shutdown_requested
 
 NUM_WORKERS = min(4, os.cpu_count() or 1)
@@ -78,6 +78,7 @@ def test_model():
             if shutdown_requested:
                 sys.exit(0)
             test_input = test_input.to(device, non_blocking=True)
+            test_input = apply_preprocess(test_input)
             target = target.to(device, non_blocking=True)
             target = target.squeeze(1).long()
 
