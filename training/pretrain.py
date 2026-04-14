@@ -41,11 +41,7 @@ NUM_EPOCHS = NUM_EPOCHS_PRETRAIN
 NUM_VAL_SAMPLES = NUM_VAL_SAMPLES_PRETRAIN
 ###-----------------------###
 
-pin_memory = False
-amp_dtype = torch.bfloat16
-logger = logging.getLogger(__name__)
-
-def main(device, model_path):
+def main(device, model_path, pin_memory, amp_dtype, logger):
 	if GRAD_ACCUM_STEPS < 1:
 		raise ValueError(f"GRAD_ACCUM_STEPS must be >= 1, got {GRAD_ACCUM_STEPS}")
 
