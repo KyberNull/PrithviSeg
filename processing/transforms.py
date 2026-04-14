@@ -6,14 +6,14 @@ from processing import IMAGENET_MEAN, IMAGENET_STD
 from processing.nsegment import NoisySegmentPlus
 from .preprocessing import apply_preprocessing, apply_clahe
 from torchvision import tv_tensors
-from torchvision.transforms import InterpolationMode, v2
+from torchvision.transforms import v2
 from torchvision.transforms.v2 import functional as F
 
 
 class TrainTransforms:
     """Data augmentation transforms used during training."""
 
-    def __init__(self):
+    def __init__(self, noisy_mask_prob=0.25, noisy_area_thresh=1000, ignore_index=255):
         self.flips = v2.Compose([v2.RandomHorizontalFlip(), v2.RandomVerticalFlip()])
         self.rotate90 = v2.RandomChoice([
             v2.RandomRotation((0, 0)),
