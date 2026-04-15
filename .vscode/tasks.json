@@ -6,7 +6,7 @@
         {
             "label": "Train",
             "type": "shell",
-            "command": "PYTHON_GIL=1 uv run train.py",
+            "command": "uv run train.py",
             "problemMatcher": [],
             "group": {
                 "kind": "build",
@@ -16,13 +16,13 @@
         {
             "label": "Evaluate",
             "type": "shell",
-            "command": "PYTHON_GIL=1 uv run evaluate.py",
+            "command": "uv run evaluate.py",
             "problemMatcher": []
         },
         {
             "label": "Pretrain",
             "type": "shell",
-            "command": "PYTHON_GIL=1 uv run pretrain.py",
+            "command": "uv run pretrain.py",
             "problemMatcher": []
         }
     ]

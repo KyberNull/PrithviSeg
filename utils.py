@@ -20,6 +20,7 @@ def setup_logging():
         handlers=[RichHandler()],
         force=True,
     )
+    return logger
 
 def device_setup():
     device = torch.device('cpu')

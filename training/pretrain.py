@@ -18,8 +18,11 @@ from config.shared import (
 	LEARNING_RATE,
 	MODEL_PATH,
 	NUM_WORKERS,
+	PREFETCH_FACTOR,
 	USE_GRADIENT_CHECKPOINTING,
+	USE_TORCH_COMPILE,
 	VAL_INTERVAL,
+	VAL_BATCH_SIZE,
 	WARMUP_EPOCHS,
 	WEIGHT_DECAY,
 )
@@ -27,7 +30,7 @@ import logging
 from losses import dice_loss, dou_loss, focal_loss
 from model import SegFormer
 from .primitives import setup_scheduler, train_batch, validate
-from .dataset_io import get_pretrain_dataloaders, load_checkpoint_pretrain
+from .io import get_pretrain_dataloaders, load_checkpoint_pretrain
 import torch
 from torchgeo.datasets import LoveDA
 from processing import EvalTransforms, TrainTransforms
@@ -40,11 +43,7 @@ NUM_EPOCHS = NUM_EPOCHS_PRETRAIN
 NUM_VAL_SAMPLES = NUM_VAL_SAMPLES_PRETRAIN
 ###-----------------------###
 
-pin_memory = False
-amp_dtype = torch.bfloat16
-logger = logging.getLogger(__name__)
-
-def main(device, model_path):
+def main(device, model_path, pin_memory, amp_dtype, logger):
 	if GRAD_ACCUM_STEPS < 1:
 		raise ValueError(f"GRAD_ACCUM_STEPS must be >= 1, got {GRAD_ACCUM_STEPS}")
 
@@ -58,10 +57,16 @@ def main(device, model_path):
 		eval_transform=EvalTransforms(),
 		batch_size=BATCH_SIZE,
 		num_workers=NUM_WORKERS,
+		prefetch_factor=PREFETCH_FACTOR,
 		pin_memory=pin_memory,
+		val_batch_size=VAL_BATCH_SIZE,
 	)
 
-	model = torch.compile(model)
+	if USE_TORCH_COMPILE and hasattr(torch, "compile"):
+		try:
+			model = torch.compile(model)
+		except RuntimeError as err:
+			logger.warning(f"torch.compile disabled due to runtime error: {err}")
 	model, optimizer, scheduler, scaler, start_epoch, train_loader = load_checkpoint_pretrain(
 		model_path=model_path,
 		model=model,

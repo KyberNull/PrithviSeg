@@ -6,7 +6,7 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 
 from .dataset import GeospatialDataset
 from .transforms import EvalTransforms, TrainTransforms
-from .preprocessing import apply_clahe, shadow_correction
+from .preprocessing import apply_preprocess
 from .postprocessing import PostProcessing, PostProcessingBuildings, PostProcessingRoads, PostProcessingWater
 
 
@@ -16,8 +16,7 @@ __all__ = [
     "TrainTransforms",
     "IMAGENET_MEAN",
     "IMAGENET_STD",
-    "apply_clahe",
-    "shadow_correction",
+    "apply_preprocess",
     "PostProcessing",
     "PostProcessingBuildings",
     "PostProcessingRoads",

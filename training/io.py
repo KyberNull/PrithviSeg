@@ -5,6 +5,27 @@ from torch import optim
 from torch.utils.data import DataLoader
 
 
+def _pad_and_stack_batch(batch):
+    """Pad variable-size (image, mask) pairs to the max H/W in batch, then stack."""
+    images, masks = zip(*batch)
+    images = [torch.as_tensor(img) for img in images]
+    masks = [torch.as_tensor(mask) for mask in masks]
+
+    max_h = max(img.shape[-2] for img in images)
+    max_w = max(img.shape[-1] for img in images)
+
+    padded_images = []
+    padded_masks = []
+    for img, mask in zip(images, masks):
+        pad_h = max_h - img.shape[-2]
+        pad_w = max_w - img.shape[-1]
+        pad = (0, pad_w, 0, pad_h)
+        padded_images.append(torch.nn.functional.pad(img, pad, mode="constant", value=0.0))
+        padded_masks.append(torch.nn.functional.pad(mask, pad, mode="constant", value=255.0))
+
+    return torch.stack(padded_images, dim=0), torch.stack(padded_masks, dim=0)
+
+
 def load_checkpoint_train(*, path, model, start_epoch_default, logger, optimizer=None, scheduler=None, scaler=None):
     start_epoch = start_epoch_default
     new_segmentation_head = False
@@ -149,7 +170,9 @@ def get_train_dataloaders(
     eval_transform,
     batch_size,
     num_workers,
+    prefetch_factor,
     pin_memory,
+    val_batch_size,
 ):
     train_dataset = geospatial_dataset_cls(img_dir=train_img_dir, img_mask=train_mask_dir, transform=train_transform)
     val_dataset = geospatial_dataset_cls(img_dir=val_img_dir, img_mask=val_mask_dir, transform=eval_transform)
@@ -160,13 +183,13 @@ def get_train_dataloaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
-        prefetch_factor=1,
+        prefetch_factor=prefetch_factor,
     )
     val_dataloader = DataLoader(
         dataset=val_dataset,
-        shuffle=False,
-        num_workers=num_workers,
+        batch_size=val_batch_size,
         pin_memory=pin_memory,
+        collate_fn=_pad_and_stack_batch,
     )
     return train_dataloader, val_dataloader
 
@@ -180,7 +203,9 @@ def get_pretrain_dataloaders(
     eval_transform,
     batch_size,
     num_workers,
+    prefetch_factor,
     pin_memory,
+    val_batch_size,
 ):
     train_dataset = loveda_cls(root=root, split="train", scene=scenes, transforms=train_transform, download=False)
     val_dataset = loveda_cls(root=root, split="val", scene=scenes, transforms=eval_transform, download=False)
@@ -191,7 +216,13 @@ def get_pretrain_dataloaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
-        prefetch_factor=1,
+        prefetch_factor=prefetch_factor,
     )
-    val_dataloader = DataLoader(dataset=val_dataset, shuffle=False, pin_memory=pin_memory)
+    val_dataloader = DataLoader(
+        dataset=val_dataset,
+        batch_size=val_batch_size,
+        shuffle=False,
+        pin_memory=pin_memory,
+        collate_fn=_pad_and_stack_batch,
+    )
     return train_dataloader, val_dataloader

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "geopandas>=1.1.2",
+    "kornia>=0.8.2",
     "matplotlib>=3.10.8",
     "opencv-python-headless>=4.13.0.92",
     "rasterio>=1.5.0",

@@ -8,9 +8,8 @@ from torch import autocast
 from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
-
-from losses import iou_metric, iou_metric_processed_fast
-
+from processing.preprocessing import apply_preprocess
+from losses import iou_metric, iou_metric_processed_fast, lovasz_loss
 
 def train_batch(
     *,
@@ -39,6 +38,9 @@ def train_batch(
     running_loss = 0.0
     optimizer.zero_grad(set_to_none=True)
 
+    
+    ll = lovasz_loss
+
     for batch, (input_tensor, output_tensor) in enumerate(epoch_bar):
         if should_stop():
             save_checkpoint_fn(model, optimizer, scheduler, scaler, epoch, model_path)
@@ -46,12 +48,15 @@ def train_batch(
 
         input_tensor = input_tensor.to(device, non_blocking=True)
         output_tensor = output_tensor.squeeze(1).to(device, non_blocking=True).long()
+        
+        with torch.no_grad():
+            input_tensor = apply_preprocess(input_tensor)
 
         with autocast(device_type=device.type, dtype=amp_dtype):
             backends = [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]
             with sdpa_kernel(backends=backends, set_priority=True):
                 prediction = model(input_tensor)
-            loss = criterion(prediction, output_tensor)
+            loss = criterion(prediction, output_tensor) + ll(prediction, output_tensor)
             loss += dice_loss_fn(prediction, output_tensor, num_classes)
             loss += dou_loss_fn(prediction, output_tensor, num_classes)
 
@@ -106,6 +111,9 @@ def validate(
 
             val_input = val_input.to(device, non_blocking=True)
             val_output = val_output.squeeze(1).to(device, non_blocking=True).long()
+
+            with torch.no_grad():
+                val_input = apply_preprocess(val_input)
 
             with autocast(device_type=device.type, dtype=amp_dtype):
                 val_prediction = model(val_input)

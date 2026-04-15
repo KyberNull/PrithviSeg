@@ -4,9 +4,12 @@ import torch
 import segmentation_models_pytorch as smp
 
 focal_loss = smp.losses.FocalLoss(
-    mode="multiclass",   # important for your case
+    mode="multiclass",   # important for our case
     gamma=2.0,
+    alpha=0.25,
 )
+
+lovasz_loss = smp.losses.LovaszLoss(mode="multiclass", ignore_index=255)
 
 def dice_loss(pred: torch.Tensor, target: torch.Tensor, num_classes: int, smooth=1e-8):
     pred = torch.softmax(pred, dim=1)
