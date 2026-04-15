@@ -1,12 +1,11 @@
 """This script implements a complete pipeline for processing large geospatial .tiff images using a SegFormer"""
 
 from config.inference import (
+    CLEANUP_TEMP_DIRS,
     NUM_CLASSES_INFERENCE,
     PATCH_SIZE,
     STRIDE,
-    TEMP_DATASET_DIR,
     TEMP_MASK_DIR,
-    USE_TORCH_COMPILE,
 )
 from config.shared import MODEL_PATH
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -23,8 +22,7 @@ from rasterio import features
 import torch
 from torchvision import tv_tensors
 from tqdm import tqdm
-from processing import EvalTransforms, PostProcessing
-import shutil
+from processing import EvalTransforms, PostProcessing, apply_preprocess
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, shape
 from shapely.ops import unary_union
 from shapely.validation import make_valid
@@ -38,13 +36,11 @@ logger = logging.getLogger(__name__)
 
 PILImage.MAX_IMAGE_PIXELS = None
 
-#Configuration
+# Configuration
 NUM_CLASSES = NUM_CLASSES_INFERENCE
 
 # Folder Setup
-DATASET_DIR = TEMP_DATASET_DIR
 MASK_DIR = TEMP_MASK_DIR
-os.makedirs(DATASET_DIR, exist_ok=True)
 os.makedirs(MASK_DIR, exist_ok=True)
 
 
@@ -65,35 +61,6 @@ def _adapt_state_dict_for_model(state_dict, model):
     return state_dict
 
 
-def _is_blank_patch(patch_rgb, nodata):
-    """Return True for empty/no-data patches to avoid model edge artifacts."""
-    patch = np.asarray(patch_rgb, dtype=np.float32)
-    if patch.size == 0:
-        return True
-    if np.isnan(patch).all():
-        return True
-
-    finite = patch[np.isfinite(patch)]
-    if finite.size == 0:
-        return True
-
-    # Nearly constant tiles are usually nodata fill in orthophoto boundaries.
-    if (float(np.max(finite)) - float(np.min(finite))) <= 1.0:
-        return True
-
-    # Heuristic for almost-all black/white tiles after boundless reads.
-    black_ratio = float(np.mean(patch <= 1.0))
-    white_ratio = float(np.mean(patch >= 254.0))
-    if black_ratio >= 0.995 or white_ratio >= 0.995:
-        return True
-
-    if nodata is not None:
-        nodata_ratio = float(np.mean(np.isclose(patch, float(nodata), atol=1.0)))
-        if nodata_ratio >= 0.995:
-            return True
-
-    return False
-
 def vectorize_chunk(args):
     """Processes a small chunk of the predicted data into polygons"""
     chunk_mask, chunk_transform, class_val = args
@@ -108,16 +75,16 @@ def vectorize_chunk(args):
             s = shape(geom)
             if not s.is_valid:
                 s = make_valid(s)
-            if not s.is_empty and s.geom_type in ['Polygon', 'MultiPolygon']:
+            if not s.is_empty and s.geom_type in ["Polygon", "MultiPolygon"]:
                 geometries.append(s)
-        except:
+        except Exception:
             continue
     return geometries
 
 def main():
     # 1. Initialize Model
     model = SegFormer(NUM_CLASSES).to(device)
-    if USE_TORCH_COMPILE and hasattr(torch, "compile"):
+    if hasattr(torch, "compile"):
         model = torch.compile(model)
 
     ckpt = torch.load(MODEL_PATH, map_location=device)
@@ -152,34 +119,25 @@ def main():
                 
                 #Exytract the .tiff patch
                 patch = src.read(window=win, boundless=True, out_shape=(src.count, PATCH_SIZE, PATCH_SIZE))
-                rgb_patch = patch[:3].transpose(1, 2, 0).astype(np.uint8) # HWC for PIL
+                patch_rgb_chw = patch[:3]
                 
                 patch_id = f"R{r}_C{c}"
-                PILImage.fromarray(rgb_patch).save(os.path.join(DATASET_DIR, f"{patch_id}.png"))
 
+                # Keep the same preprocessing and postprocessing flow as evaluate.py.
+                img_t = tv_tensors.Image(torch.from_numpy(patch_rgb_chw))
+                dummy_m = tv_tensors.Mask(torch.zeros((1, PATCH_SIZE, PATCH_SIZE)))
+                img_t, _ = transform(img_t, dummy_m)
 
-                patch_rgb_chw = patch[:3]
-                if _is_blank_patch(patch_rgb_chw, src.nodata):
-                    mask_1024 = np.zeros((PATCH_SIZE, PATCH_SIZE), dtype=np.uint8)
-                else:
-                    # Making a dummy mask to be passed into EvalTransform as it needs both an image and a mask.
-                    img_t = tv_tensors.Image(torch.from_numpy(patch_rgb_chw))
-                    dummy_m = tv_tensors.Mask(torch.zeros((1, PATCH_SIZE, PATCH_SIZE)))
-                    img_t, _ = transform(img_t, dummy_m)
-
-                    # Getting the prediction mask and resizing it up.
-                    with torch.no_grad():
-                        preds = model(img_t.unsqueeze(0).to(device))
-                        mask_512 = post_processor(preds)[0]
-                        mask_1024 = torch.nn.functional.interpolate(
-                            mask_512.unsqueeze(0).unsqueeze(0).float(),
-                            size=(PATCH_SIZE, PATCH_SIZE), mode="nearest"
-                        ).squeeze().cpu().numpy().astype(np.uint8)
+                with torch.no_grad():
+                    img_b = img_t.unsqueeze(0).to(device, non_blocking=True)
+                    img_b = apply_preprocess(img_b)
+                    preds = model(img_b)
+                    mask_pred = post_processor(preds)[0].cpu().numpy().astype(np.uint8)
 
                 #Cropping edges so it does not rasterize outside the boundaries
                 valid_h = min(PATCH_SIZE, H - r)
                 valid_w = min(PATCH_SIZE, W - c)
-                mask_patch = mask_1024[:valid_h, :valid_w]
+                mask_patch = mask_pred[:valid_h, :valid_w]
 
                 # Saved the predicted mask
                 mask_file = f"{patch_id}_mask.png"
@@ -257,14 +215,14 @@ def main():
                 logging.info(f"Saved: {output_shp}")
 
 
-    # Delete temporary inference folders created during this run.
-    for folder in [MASK_DIR, DATASET_DIR]:
-        if os.path.isdir(folder):
+    if CLEANUP_TEMP_DIRS and os.path.isdir(MASK_DIR):
+        for m_file in current_mask_files:
+            mask_path = os.path.join(MASK_DIR, m_file)
             try:
-                shutil.rmtree(folder)
-                logging.info(f"Deleted temporary folder: {folder}")
+                if os.path.isfile(mask_path):
+                    os.remove(mask_path)
             except Exception as exc:
-                logging.warning(f"Could not delete folder '{folder}': {exc}")
+                logging.warning(f"Could not delete mask '{mask_path}': {exc}")
 
 if __name__ == "__main__":
 
